@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Kmsoft>
+    <Item type="Part_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="原点" title="原点" value="" data_type="point" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+                <Item name="主方向" title="主方向" value="" data_type="direction" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item type="Group_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="依赖方向" title="依赖方向" value="任意方向" data_type="" visible="1" edit="1" type="Multi" defaultval="任意方向|任意方向;从父;未配置;主方向1;主方向2;主方向3;任意方向" respath="" />
+                <Item name="依赖方式" title="依赖方式" value="无" data_type="" visible="1" edit="1" type="Multi" defaultval="无|无;相同;相反;平行;平行且在同侧;平行且在反侧;垂直;不平行;接近;接近反向;" respath="" />
+                <Item name="特征选择" title="特征选择" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="kmfeatype" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item id="86b62f69e6154defa7c4a42cfdefeac" type="Part" filename="3T(new).prt">
+        <Params>
+            <param name="原点" value="" />
+            <param name="主方向" value="" />
+        </Params>
+        <Item id="808d5934ffe2433fa46268d9ea678bc" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="分组1" />
+                <param name="依赖方向" value="任意方向" />
+                <param name="依赖方式" value="无" />
+                <param name="特征选择" value="" />
+            </Params>
+        </Item>
+    </Item>
+</Kmsoft>

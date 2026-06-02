@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="GB2312" ?>
+<Kmsoft>
+    <Item type="Part_Template">
+        <GridPropList>
+            <GridProp name="�ڵ�����">
+                <Item name="ԭ��" title="ԭ��" value="" data_type="point" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item type="Group_Template">
+        <GridPropList>
+            <GridProp name="�ڵ�����">
+                <Item name="��������" title="��������" value="" data_type="" visible="1" edit="1" type="Multi" defaultval="���ⷽ��|���ⷽ��;�Ӹ�;������1;������2;������3;������4;������5;������6;��Բ�ӹ�����;����Բ�ӹ�����;���淽��;�޿��з���;�޿��мӹ�����;δ����" respath="" />
+                <Item name="������ʽ" title="������ʽ" value="" data_type="" visible="1" edit="1" type="Multi" defaultval="��|��;��ͬ;�෴;ƽ��;ƽ������ͬ��;ƽ�����ڷ���;��ֱ;��ƽ��;�ӽ�;�ӽ�����;�������᷽��ƽ��;��ͬ��ӽ�;�෴��ӽ�����" respath="" />
+                <Item name="����ѡ��" title="����ѡ��" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="kmfeatype" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item id="14fa14e0c75d48b0a838f29962e9e519" type="Part" filename="" >
+        <Params>
+            <param name="ԭ��" value="" />
+        </Params>
+        <Item id="e71991773f144bd6a16e0f5f3e4680ea" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="����" value="A��" />
+                <param name="��������" value="���ⷽ��" />
+                <param name="������ʽ" value="��" />
+                <param name="����ѡ��" value="" />
+            </Params>
+        </Item>
+    </Item>
+</Kmsoft>
