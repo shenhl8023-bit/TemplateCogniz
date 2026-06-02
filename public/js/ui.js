@@ -1,5 +1,5 @@
 import { state, findNodeById } from './store.js';
-import { apiInit, apiSave } from './services.js';
+import { apiApplyGroupTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
 import { AIService } from './ai-service.js';
 import { ChatEngine } from './chat-engine.js';
 import { renderTree } from './tree-view.js';
@@ -25,6 +25,8 @@ import { fieldDesc } from './param-meta.js';
 const els = {
   describeSamplePanel: document.getElementById('describeSamplePanel'),
   describeExampleList: document.getElementById('describeExampleList'),
+  templateRecommendPanel: document.getElementById('templateRecommendPanel'),
+  templateRecommendList: document.getElementById('templateRecommendList'),
   manualSelectPanel: document.getElementById('manualSelectPanel'),
   entryCard: document.getElementById('entryCard'),
   manualPanel: document.getElementById('manualPanel'),
@@ -272,6 +274,123 @@ function renderDescribeExampleList() {
   }
 }
 
+function renderTemplateRecommendations() {
+  if (!els.templateRecommendPanel || !els.templateRecommendList) return;
+  const recommendations = Array.isArray(state.templateRecommendations) ? state.templateRecommendations : [];
+  const recognition = state.selectedRecognitionTemplate;
+  els.templateRecommendPanel.classList.toggle('hidden', recommendations.length === 0 && !recognition);
+  els.templateRecommendList.innerHTML = '';
+  if (recognition) {
+    const recCard = document.createElement('div');
+    recCard.className = 'template-recommend-item recognition-template-item';
+
+    const head = document.createElement('div');
+    head.className = 'template-recommend-head';
+    const title = document.createElement('div');
+    title.className = 'template-recommend-title';
+    title.textContent = `自动识别模板：${recognition.name}`;
+    const score = document.createElement('div');
+    score.className = 'template-recommend-score';
+    score.textContent = `${Math.round((recognition.confidence || 0) * 100)}%`;
+    head.appendChild(title);
+    head.appendChild(score);
+    recCard.appendChild(head);
+
+    const meta = document.createElement('div');
+    meta.className = 'template-recommend-meta';
+    meta.textContent = `将识别：${(recognition.recognizes || []).join('、')}`;
+    recCard.appendChild(meta);
+
+    const reasons = document.createElement('div');
+    reasons.className = 'template-recommend-reasons';
+    reasons.textContent = (recognition.reasons || []).join('；');
+    recCard.appendChild(reasons);
+    els.templateRecommendList.appendChild(recCard);
+  }
+  if (!recommendations.length) return;
+
+  for (const item of recommendations) {
+    const card = document.createElement('div');
+    card.className = 'template-recommend-item';
+
+    const head = document.createElement('div');
+    head.className = 'template-recommend-head';
+    const title = document.createElement('div');
+    title.className = 'template-recommend-title';
+    title.textContent = item.displayName || item.filename;
+    const score = document.createElement('div');
+    score.className = 'template-recommend-score';
+    score.textContent = `${Math.round((item.confidence || 0) * 100)}%`;
+    head.appendChild(title);
+    head.appendChild(score);
+    card.appendChild(head);
+
+    const meta = document.createElement('div');
+    meta.className = 'template-recommend-meta';
+    meta.textContent = `分组 ${item.groupCount || 0} 个，层级 ${item.depth || 0}`;
+    card.appendChild(meta);
+
+    const reasons = document.createElement('div');
+    reasons.className = 'template-recommend-reasons';
+    reasons.textContent = (item.reasons || []).join('；');
+    card.appendChild(reasons);
+
+    const features = document.createElement('div');
+    features.className = 'template-recommend-tags';
+    const tags = [...(item.groupNames || []), ...(item.featureSelections || [])].slice(0, 8);
+    for (const tag of tags) {
+      const chip = document.createElement('span');
+      chip.textContent = tag;
+      features.appendChild(chip);
+    }
+    card.appendChild(features);
+
+    const actions = document.createElement('div');
+    actions.className = 'template-recommend-actions';
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = state.selectedGroupTemplate && state.selectedGroupTemplate.id === item.id ? '已应用' : '应用模板';
+    applyBtn.disabled = state.selectedGroupTemplate && state.selectedGroupTemplate.id === item.id;
+    applyBtn.addEventListener('click', () => applyRecommendedTemplate(item.id));
+    actions.appendChild(applyBtn);
+    card.appendChild(actions);
+
+    els.templateRecommendList.appendChild(card);
+  }
+}
+
+async function recommendTemplatesFromText(text) {
+  if (!text || !text.trim()) return;
+  try {
+    const data = await apiRecommendGroupTemplates(text.trim(), 3);
+    state.templateRecommendations = data.recommendations || [];
+    renderTemplateRecommendations();
+  } catch (e) {
+    chatView.addMessage('system', `模板推荐失败：${e.message}`);
+  }
+}
+
+async function applyRecommendedTemplate(templateId) {
+  if (!templateId) return;
+  try {
+    const data = await apiApplyGroupTemplate(templateId);
+    state.draft = adoptServerDraft(data.draft);
+    state.selectedGroupTemplate = data.template || null;
+    state.selectedRecognitionTemplate = data.recognitionRecommendation || null;
+    state.selectedNodeId = null;
+    expandedNodeIds.clear();
+    setXml(data.xml);
+    renderAll();
+    chatView.addMessage('bot', `已应用分组模板「${data.template.displayName || data.template.filename}」。`);
+    if (state.selectedRecognitionTemplate) {
+      chatView.addMessage('bot', `已选择自动识别模板「${state.selectedRecognitionTemplate.name}」。`);
+    }
+    chatView.addMessage('system', `当前分组结构：\n${data.structureSummary || '(暂无分组)'}`);
+  } catch (e) {
+    chatView.addMessage('bot', `应用模板失败：${e.message}`);
+  }
+}
+
 function renderAll() {
   if (state.selectedNodeId && !findNodeById(state.draft.groups, state.selectedNodeId)) {
     state.selectedNodeId = null;
@@ -322,6 +441,7 @@ function renderAll() {
   };
 
   renderTreeOnly();
+  renderTemplateRecommendations();
 
   if (els.partCardsSection) {
     els.partCardsSection.classList.remove('hidden');
@@ -419,6 +539,9 @@ async function sendChat() {
   }
   chatView.clearInput();
   chatView.addMessage('user', text);
+  if (state.modeType === 'describe') {
+    recommendTemplatesFromText(text);
+  }
   const pending = chatView.addPendingMessage('LLM等待中（已等待 0 秒）');
   const start = Date.now();
   let warnedSlow = false;
@@ -618,6 +741,10 @@ export async function initApp() {
   state.features = data.features || [];
   state.featureTree = data.featureTree || [];
   state.scenePresets = data.scenePresets || [];
+  state.groupTemplates = data.groupTemplates || [];
+  state.templateRecommendations = [];
+  state.selectedGroupTemplate = null;
+  state.selectedRecognitionTemplate = null;
   state.supportedPartFields = data.supportedPartFields || [];
   renderPartFieldList(state.supportedPartFields);
   renderDescribeExampleList();

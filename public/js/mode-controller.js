@@ -45,6 +45,9 @@ export function createModeController({
     state.partFieldsConfirmed = false;
     state.selectedNodeId = null;
     state.draggingNodeId = null;
+    state.templateRecommendations = [];
+    state.selectedGroupTemplate = null;
+    state.selectedRecognitionTemplate = null;
     state.draft.groups = [];
     if (els.manualPanel) els.manualPanel.classList.add('hidden');
     if (els.entryCard) els.entryCard.classList.remove('hidden');

@@ -89,6 +89,33 @@ const SCENE_PRESETS = [
   }
 ];
 
+const RECOGNITION_TEMPLATES = [
+  {
+    id: 'rotary_recognition',
+    name: '回转体自动识别模板',
+    partTypes: ['回转体', '轴类', '套类', '衬套'],
+    requiredPartFields: ['原点', '主方向1', '有主轴线'],
+    keywords: ['衬套', '回转体', '轴类', 'A侧', 'B侧', '端面', '外圆', '孔', '外环槽', '内环槽', '倒角'],
+    recognizes: ['端面', '外圆', '孔', '外环槽', '内环槽', '倒角倒圆']
+  },
+  {
+    id: 'housing_multi_face_recognition',
+    name: '壳体多面自动识别模板',
+    partTypes: ['壳体', '箱体', '多面加工'],
+    requiredPartFields: ['主方向1', '主方向2', '主方向3', '主方向4', '主方向5', '主方向6'],
+    keywords: ['壳体', '箱体', '六面', '平面', '孔系', '通槽', '周边', '加工面分离'],
+    recognizes: ['六面', '平面', '孔系', '通槽', '凹槽', '台阶']
+  },
+  {
+    id: 'simple_feature_recognition',
+    name: '简单件特征识别模板',
+    partTypes: ['简单件', '小件'],
+    requiredPartFields: ['原点', '主方向'],
+    keywords: ['简单', '小件', '平面', '孔', '通槽'],
+    recognizes: ['平面', '孔', '通槽', '倒角']
+  }
+];
+
 function defaultSettings() {
   return {
     llmEnabled: false,
@@ -645,6 +672,377 @@ function readFeatureCatalog() {
 
 function readFeatures() {
   return readFeatureCatalog().flat;
+}
+
+function listXmlFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listXmlFiles(full));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith('.xml')) out.push(full);
+  }
+  return out;
+}
+
+function xmlAttr(tag, name) {
+  const re = new RegExp(`${name}\\s*=\\s*(['"])(.*?)\\1`);
+  const m = re.exec(tag);
+  return m ? m[2] : '';
+}
+
+function extractFirstBlock(text, startRe) {
+  const startMatch = startRe.exec(text);
+  if (!startMatch) return '';
+  const start = startMatch.index;
+  const openEnd = text.indexOf('>', start);
+  if (openEnd < 0) return '';
+  let depth = 1;
+  const tokenRe = /<Item\b[^>]*>|<\/Item>/g;
+  tokenRe.lastIndex = openEnd + 1;
+  let m;
+  while ((m = tokenRe.exec(text))) {
+    if (m[0].startsWith('</Item')) {
+      depth--;
+      if (depth === 0) return text.slice(start, tokenRe.lastIndex);
+    } else if (!m[0].endsWith('/>')) {
+      depth++;
+    }
+  }
+  return '';
+}
+
+function parseTemplateFields(xml, type) {
+  const block = extractFirstBlock(xml, new RegExp(`<Item\\b[^>]*type=["']${type}["'][^>]*>`));
+  const fields = [];
+  const itemRe = /<Item\b([^>]*)\/>/g;
+  let m;
+  while ((m = itemRe.exec(block))) {
+    const tag = m[0];
+    const name = xmlAttr(tag, 'name').trim();
+    if (name && !fields.includes(name)) fields.push(name);
+  }
+  return fields;
+}
+
+function parseParams(block) {
+  const params = {};
+  const paramsBlock = /<Params>([\s\S]*?)<\/Params>/.exec(block);
+  if (!paramsBlock) return params;
+  const paramRe = /<param\b([^>]*)\/>/g;
+  let m;
+  while ((m = paramRe.exec(paramsBlock[1]))) {
+    const tag = m[0];
+    const name = xmlAttr(tag, 'name').trim();
+    if (!name) continue;
+    params[name] = xmlAttr(tag, 'value');
+  }
+  return params;
+}
+
+function parseGroupItems(xml) {
+  const groups = [];
+  const stack = [];
+  const tokenRe = /<Item\b[^>]*type=["']Group["'][^>]*>|<\/Item>/g;
+  let m;
+  while ((m = tokenRe.exec(xml))) {
+    const token = m[0];
+    if (token.startsWith('</Item')) {
+      if (stack.length) stack.pop();
+      continue;
+    }
+    const openEnd = tokenRe.lastIndex;
+    const paramsStart = xml.indexOf('<Params>', openEnd);
+    const paramsEnd = paramsStart >= 0 ? xml.indexOf('</Params>', paramsStart) : -1;
+    const paramsBlock = paramsStart >= 0 && paramsEnd >= 0
+      ? xml.slice(paramsStart, paramsEnd + '</Params>'.length)
+      : '';
+    const params = parseParams(paramsBlock);
+    const name = params['名称'] || xmlAttr(token, 'name') || '未命名分组';
+    const node = {
+      id: uid(),
+      name,
+      params: { '名称': name, ...params },
+      children: []
+    };
+    if (stack.length) stack[stack.length - 1].children.push(node);
+    else groups.push(node);
+    stack.push(node);
+  }
+  return groups;
+}
+
+function collectGroupStats(groups) {
+  const groupNames = [];
+  const featureSelections = [];
+  let groupCount = 0;
+  let depth = 0;
+
+  const walk = (nodes, level) => {
+    depth = Math.max(depth, level);
+    for (const node of nodes) {
+      groupCount++;
+      if (node.name && !groupNames.includes(node.name)) groupNames.push(node.name);
+      const featureValue = node.params && node.params['特征选择'];
+      if (featureValue) {
+        for (const item of String(featureValue).split(',')) {
+          const value = item.trim();
+          if (value && !featureSelections.includes(value)) featureSelections.push(value);
+        }
+      }
+      walk(node.children || [], level + 1);
+    }
+  };
+
+  walk(groups, 1);
+  return { groupNames, featureSelections, groupCount, depth };
+}
+
+function parseTemplateXml(filePath) {
+  const xml = fs.readFileSync(filePath, 'utf8');
+  const partTemplateFields = parseTemplateFields(xml, 'Part_Template');
+  const groupTemplateFields = parseTemplateFields(xml, 'Group_Template');
+  const partBlock = extractFirstBlock(xml, /<Item\b[^>]*type=["']Part["'][^>]*>/);
+  const partParams = parseParams(partBlock);
+  const groups = parseGroupItems(partBlock || xml);
+  const stats = collectGroupStats(groups);
+  const filename = path.basename(filePath);
+  const displayName = filename.replace(/\.xml$/i, '');
+  const id = crypto.createHash('sha1').update(path.relative(TEMPLATE_DIR, filePath)).digest('hex').slice(0, 12);
+
+  return {
+    id,
+    filename,
+    displayName,
+    sourcePath: filePath,
+    relativePath: path.relative(TEMPLATE_DIR, filePath),
+    partTemplateFields,
+    groupTemplateFields,
+    partParams,
+    groups,
+    groupNames: stats.groupNames,
+    featureSelections: stats.featureSelections,
+    groupCount: stats.groupCount,
+    depth: stats.depth
+  };
+}
+
+function publicTemplateItem(item) {
+  return {
+    id: item.id,
+    filename: item.filename,
+    displayName: item.displayName,
+    sourcePath: item.sourcePath,
+    relativePath: item.relativePath,
+    partTemplateFields: item.partTemplateFields,
+    groupTemplateFields: item.groupTemplateFields,
+    groupNames: item.groupNames,
+    featureSelections: item.featureSelections,
+    groupCount: item.groupCount,
+    depth: item.depth
+  };
+}
+
+function readTemplateCatalog() {
+  return listXmlFiles(TEMPLATE_DIR)
+    .map((filePath) => {
+      try {
+        return parseTemplateXml(filePath);
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function keywordHits(text, values) {
+  const hits = [];
+  const source = String(text || '').toLowerCase();
+  for (const value of values || []) {
+    const token = String(value || '').trim();
+    if (!token) continue;
+    const normalized = token.toLowerCase();
+    if ((source.includes(normalized) || normalized.includes(source)) && !hits.includes(token)) hits.push(token);
+  }
+  return hits;
+}
+
+function domainKeywordHits(text, values) {
+  const hits = keywordHits(text, values);
+  const source = String(text || '').toLowerCase();
+  const domainTerms = ['衬套', '回转体', '轴类', '套类', 'a侧', 'b侧', 'a测', 'b测', '端面', '外圆', '孔', '外环槽', '内环槽', '倒角', '倒圆', '壳体', '平面', '通槽', '孔系', '凹槽'];
+  for (const value of values || []) {
+    const token = String(value || '').trim();
+    if (!token || hits.includes(token)) continue;
+    const normalized = token.toLowerCase();
+    const matched = domainTerms.some((term) => source.includes(term) && normalized.includes(term));
+    if (matched) hits.push(token);
+  }
+  return hits;
+}
+
+function inferPartTypeHits(text, item) {
+  const haystack = `${text} ${item.filename} ${item.displayName} ${item.groupNames.join(' ')} ${item.featureSelections.join(' ')}`;
+  const rules = [
+    { label: '衬套/套类', terms: ['衬套', '套', '套类'] },
+    { label: '回转体/轴类', terms: ['回转体', '轴类', '主轴线', '外圆', '端面'] },
+    { label: '壳体/多面加工', terms: ['壳体', '箱体', '多面', '六面', '孔系', '通槽'] }
+  ];
+  return rules
+    .filter((rule) => rule.terms.some((term) => haystack.includes(term) && String(text || '').includes(term)))
+    .map((rule) => rule.label);
+}
+
+function scoreTemplate(text, item) {
+  const reasons = [];
+  let score = 0;
+
+  const typeHits = inferPartTypeHits(text, item);
+  if (typeHits.length) {
+    score += 35 + Math.min(15, typeHits.length * 5);
+    reasons.push(`零件类型命中：${typeHits.join('、')}`);
+  }
+
+  const featureHits = domainKeywordHits(text, item.featureSelections);
+  if (featureHits.length) {
+    score += Math.min(30, featureHits.length * 8);
+    reasons.push(`特征命中：${featureHits.join('、')}`);
+  }
+
+  const groupHits = domainKeywordHits(text, item.groupNames);
+  if (groupHits.length) {
+    score += Math.min(20, groupHits.length * 5);
+    reasons.push(`分组名称命中：${groupHits.join('、')}`);
+  }
+
+  const fieldHits = keywordHits(text, [...item.partTemplateFields, ...item.groupTemplateFields]);
+  if (fieldHits.length) {
+    score += Math.min(15, fieldHits.length * 4);
+    reasons.push(`参数字段命中：${fieldHits.join('、')}`);
+  }
+
+  if (score === 0 && item.groupCount > 0) {
+    score = 1;
+    reasons.push('作为可用样例模板列入备选');
+  }
+
+  return {
+    ...publicTemplateItem(item),
+    score,
+    confidence: Math.min(0.99, Number((score / 100).toFixed(2))),
+    reasons
+  };
+}
+
+function recommendGroupTemplates({ text = '', catalog = readTemplateCatalog(), limit = 5 } = {}) {
+  return catalog
+    .map((item) => scoreTemplate(text, item))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || b.groupCount - a.groupCount || a.filename.localeCompare(b.filename, 'zh'))
+    .slice(0, limit);
+}
+
+function listRecognitionTemplates() {
+  return RECOGNITION_TEMPLATES.map((item) => ({ ...item }));
+}
+
+function recognitionHaystack({ text = '', groupTemplate = null, draft = null } = {}) {
+  const groupNames = [];
+  const featureSelections = [];
+  if (groupTemplate) {
+    groupNames.push(...(groupTemplate.groupNames || []));
+    featureSelections.push(...(groupTemplate.featureSelections || []));
+  }
+  if (draft && Array.isArray(draft.groups)) {
+    const stats = collectGroupStats(draft.groups);
+    groupNames.push(...stats.groupNames);
+    featureSelections.push(...stats.featureSelections);
+  }
+  const partFields = draft && Array.isArray(draft.partTemplateFields) ? draft.partTemplateFields : [];
+  return `${text} ${groupNames.join(' ')} ${featureSelections.join(' ')} ${partFields.join(' ')}`;
+}
+
+function scoreRecognitionTemplate(input, template) {
+  const haystack = recognitionHaystack(input);
+  const reasons = [];
+  let score = 0;
+
+  const typeHits = keywordHits(haystack, template.partTypes || []);
+  if (typeHits.length) {
+    score += Math.min(35, typeHits.length * 14);
+    reasons.push(`零件类型命中：${typeHits.join('、')}`);
+  }
+
+  const keywordMatches = keywordHits(haystack, template.keywords || []);
+  if (keywordMatches.length) {
+    score += Math.min(35, keywordMatches.length * 6);
+    reasons.push(`识别关键词命中：${keywordMatches.join('、')}`);
+  }
+
+  const fieldMatches = keywordHits(haystack, template.requiredPartFields || []);
+  if (fieldMatches.length) {
+    score += Math.min(20, fieldMatches.length * 7);
+    reasons.push(`零件参数匹配：${fieldMatches.join('、')}`);
+  }
+
+  const recognizeMatches = keywordHits(haystack, template.recognizes || []);
+  if (recognizeMatches.length) {
+    score += Math.min(20, recognizeMatches.length * 5);
+    reasons.push(`可识别对象匹配：${recognizeMatches.join('、')}`);
+  }
+
+  if (score === 0) {
+    score = 1;
+    reasons.push('作为可用识别模板列入备选');
+  }
+
+  return {
+    ...template,
+    score,
+    confidence: Math.min(0.99, Number((score / 100).toFixed(2))),
+    reasons
+  };
+}
+
+function recommendRecognitionTemplates({
+  text = '',
+  groupTemplate = null,
+  draft = null,
+  templates = listRecognitionTemplates(),
+  limit = 3
+} = {}) {
+  return templates
+    .map((template) => scoreRecognitionTemplate({ text, groupTemplate, draft }, template))
+    .filter((template) => template.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'zh'))
+    .slice(0, limit);
+}
+
+function cloneTemplateGroups(groups) {
+  return (groups || []).map((node) => ({
+    id: uid(),
+    name: node.name,
+    params: { ...(node.params || {}), '名称': node.name },
+    children: cloneTemplateGroups(node.children || [])
+  }));
+}
+
+function applyGroupTemplate(templateId, { catalog = readTemplateCatalog() } = {}) {
+  const selected = catalog.find((item) => item.id === templateId || item.filename === templateId || item.relativePath === templateId);
+  if (!selected) return { ok: false, message: '未找到分组模板' };
+  const draft = normalizeDraft({
+    ...defaultDraft(),
+    partTemplateFields: [...selected.partTemplateFields],
+    groupTemplateFields: [...selected.groupTemplateFields],
+    partParams: { ...selected.partParams },
+    groups: cloneTemplateGroups(selected.groups)
+  });
+  return {
+    ok: true,
+    template: publicTemplateItem(selected),
+    draft,
+    summary: buildGroupStructureText(draft.groups || [])
+  };
 }
 
 function uid() {
@@ -1661,6 +2059,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       sampleGuide: '示例：我有A侧和B侧两个分组，在A侧添加外圆和端面，B侧也一样。',
       scenePresets: SCENE_PRESETS,
+      groupTemplates: readTemplateCatalog().map(publicTemplateItem),
       supportedPartFields: SUPPORTED_PART_FIELDS,
       defaultGroupTemplateFields: DEFAULT_GROUP_TEMPLATE_FIELDS,
       features: catalog.flat,
@@ -1671,6 +2070,72 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/settings') {
     return sendJson(res, 200, { ok: true, settings: readSettings() });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/group-templates') {
+    const templates = readTemplateCatalog().map(publicTemplateItem);
+    return sendJson(res, 200, { ok: true, templates });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/recognition-templates') {
+    return sendJson(res, 200, { ok: true, templates: listRecognitionTemplates() });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/group-templates/recommend') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      const parsed = safeJsonParse(body) || {};
+      const recommendations = recommendGroupTemplates({
+        text: String(parsed.text || parsed.message || '').trim(),
+        limit: Number(parsed.limit) || 5
+      });
+      sendJson(res, 200, { ok: true, recommendations });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/group-templates/apply') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      const parsed = safeJsonParse(body) || {};
+      const result = applyGroupTemplate(String(parsed.templateId || '').trim());
+      if (!result.ok) {
+        return sendJson(res, 404, result);
+      }
+      const xml = buildXml(result.draft);
+      const recognitionRecommendation = recommendRecognitionTemplates({
+        groupTemplate: result.template,
+        draft: result.draft,
+        limit: 1
+      })[0] || null;
+      sendJson(res, 200, {
+        ok: true,
+        template: result.template,
+        draft: result.draft,
+        xml,
+        structureSummary: result.summary,
+        recognitionRecommendation
+      });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/recognition-templates/recommend') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      const parsed = safeJsonParse(body) || {};
+      const recommendations = recommendRecognitionTemplates({
+        text: String(parsed.text || parsed.message || '').trim(),
+        groupTemplate: parsed.groupTemplate || null,
+        draft: parsed.draft || null,
+        limit: Number(parsed.limit) || 3
+      });
+      sendJson(res, 200, { ok: true, recommendations });
+    });
+    return;
   }
 
   if (req.method === 'POST' && pathname === '/api/settings') {
@@ -1749,11 +2214,21 @@ const server = http.createServer((req, res) => {
       }
 
       const features = readFeatures();
-      const result = await applyMessageWithLlm(draft, message, features);
+      let result = await applyMessageWithLlm(draft, message, features);
+      if (!result) {
+        const fallback = applyMessage(draft, message, features);
+        if (fallback && fallback.draft) {
+          result = {
+            ...fallback,
+            llmUsed: false,
+            llmUnderstanding: ''
+          };
+        }
+      }
       if (!result) {
         return sendJson(res, 502, {
           ok: false,
-          message: 'LLM 未返回可执行结果（当前已禁用规则兜底）。请稍后重试或调整模型设置。'
+          message: '未返回可执行结果。请稍后重试或补充更明确的分组描述。'
         });
       }
 
@@ -1763,7 +2238,7 @@ const server = http.createServer((req, res) => {
         reply: result.reply,
         draft: result.draft,
         xml,
-        llmUsed: true,
+        llmUsed: !!result.llmUsed,
         llmUnderstanding: result.llmUnderstanding || '',
         structureSummary: buildGroupStructureText(result.draft.groups || [])
       });
@@ -1814,9 +2289,15 @@ if (process.env.NO_LISTEN !== '1') {
 }
 
 module.exports = {
+  server,
   defaultDraft,
   normalizeDraft,
   readFeatures,
+  readTemplateCatalog,
+  recommendGroupTemplates,
+  listRecognitionTemplates,
+  recommendRecognitionTemplates,
+  applyGroupTemplate,
   applyMessage,
   buildXml,
   validateBasicXml,
