@@ -48,6 +48,14 @@ export function createChatView({ chatLogEl, chatInputEl, sendBtnEl }) {
 
   function bindSend(handler) {
     sendBtnEl.addEventListener('click', handler);
+    chatInputEl.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.shiftKey || chatInputEl.disabled || sendBtnEl.disabled) {
+        return;
+      }
+
+      event.preventDefault();
+      handler(event);
+    });
   }
 
   return {

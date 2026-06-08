@@ -234,6 +234,23 @@ export function renderGroupCards(
   const actions = document.createElement('div');
   actions.className = 'group-card-actions';
 
+  let feedbackTimer = null;
+  const feedback = document.createElement('div');
+  feedback.className = 'group-save-feedback hidden';
+
+  const hideFeedback = () => {
+    feedback.textContent = '';
+    feedback.classList.add('hidden');
+    feedbackTimer = null;
+  };
+
+  const showSuccessFeedback = () => {
+    if (feedbackTimer) clearTimeout(feedbackTimer);
+    feedback.textContent = '修改成功';
+    feedback.classList.remove('hidden');
+    feedbackTimer = setTimeout(hideFeedback, 2000);
+  };
+
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'group-btn group-btn-cancel';
@@ -244,8 +261,18 @@ export function renderGroupCards(
   saveBtn.type = 'button';
   saveBtn.className = 'group-btn group-btn-save';
   saveBtn.textContent = '保存参数';
-  saveBtn.addEventListener('click', () => handlers.onSave());
+  saveBtn.addEventListener('click', () => {
+    const result = handlers.onSave();
+    if (result && typeof result.then === 'function') {
+      result.then((ok) => {
+        if (ok !== false) showSuccessFeedback();
+      });
+      return;
+    }
+    if (result !== false) showSuccessFeedback();
+  });
 
+  actions.appendChild(feedback);
   actions.appendChild(cancelBtn);
   actions.appendChild(saveBtn);
   rootEl.appendChild(actions);

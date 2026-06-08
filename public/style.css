@@ -102,6 +102,7 @@ body {
   grid-template-columns: minmax(520px, 1fr) 10px minmax(320px, var(--right-panel-width));
   gap: 0;
   padding: 0;
+  height: calc(100vh - 64px);
   min-height: calc(100vh - 64px);
 }
 
@@ -115,6 +116,16 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.chat-main-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  scrollbar-gutter: stable;
 }
 
 .splitter {
@@ -507,8 +518,8 @@ button:focus-visible {
 }
 
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 12px; }
-.right-scroll { overflow: auto; padding: 0 12px 12px; }
-.right-scroll { overflow: auto; padding: 0 10px 10px; }
+.right-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 12px 12px; }
+.right-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 10px 10px; }
 
 .stack-card {
   border: 1px solid var(--border-soft);
@@ -517,6 +528,32 @@ button:focus-visible {
   margin-bottom: 8px;
   background: linear-gradient(180deg, #172b50, #132444);
   box-shadow: inset 0 0 0 1px rgba(51, 85, 126, 0.16), var(--shadow-1);
+}
+
+.right-section-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #bfd4f1;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  padding: 12px 12px 11px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 10px 22px rgba(63, 99, 150, 0.11);
+}
+
+.right-section-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, #7fb2f2, #d5e8ff);
+}
+
+.right-section-card + .right-section-card {
+  border-top: 1px solid #c7d9f1;
+  margin-top: 10px;
 }
 
 .stack-card h2 {
@@ -730,8 +767,22 @@ button:focus-visible {
 .group-card-actions {
   margin-top: 10px;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.group-save-feedback {
+  min-width: 68px;
+  padding: 5px 9px;
+  border: 1px solid #b9e3d5;
+  border-radius: 8px;
+  background: #f2fffa;
+  color: #16745d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
 }
 
 #groupCards > .card {
@@ -872,11 +923,13 @@ button:focus-visible {
 }
 
 .right-scroll::-webkit-scrollbar,
+.chat-main-scroll::-webkit-scrollbar,
 .chat-log::-webkit-scrollbar {
   width: 8px;
 }
 
 .right-scroll::-webkit-scrollbar-thumb,
+.chat-main-scroll::-webkit-scrollbar-thumb,
 .chat-log::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, #2e628f, #235079);
   border-radius: 999px;
@@ -899,7 +952,7 @@ button:focus-visible {
   #resetBtn { font-size: 14px; }
   .entry-actions button { font-size: 13px; min-height: 36px; }
   #previewTemplateBtn { font-size: 12px; }
-  .layout { grid-template-columns: 1fr; min-height: auto; }
+  .layout { grid-template-columns: 1fr; height: auto; min-height: auto; }
   .splitter { display: none; }
   .chat-panel { border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-radius: 14px; }
   .preview-panel { border-right: 1px solid var(--border); border-radius: 14px; margin-top: 10px; }
@@ -1165,7 +1218,7 @@ textarea,
 
 /* Restore original chat flow (input follows content area, not fixed) */
 .chat-panel {
-  height: auto;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;

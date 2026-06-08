@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI对话生成分组模板</title>
-  <link rel="stylesheet" href="/style.css?v=20260303_24" />
+  <link rel="stylesheet" href="/style.css?v=20260608_1" />
 </head>
 <body>
   <header class="topbar">
@@ -23,48 +23,50 @@
 
   <div class="layout">
     <section class="chat-panel">
-      <div class="floating-content">
-        <div class="assistant-row" id="entryCard">
-          <div class="assistant-avatar">🤖</div>
-          <div class="entry-card">
-            <h2>你好！我是零件分组模板生成助手</h2>
-            <p>我会通过对话引导你创建分组模板。请选择操作方式：</p>
-            <div class="entry-actions">
-              <button id="modeDescribeBtn">描述零件类型（智能推荐参数）</button>
-              <button id="modeManualBtn">手动选择参数</button>
+      <div class="chat-main-scroll">
+        <div class="floating-content">
+          <div class="assistant-row" id="entryCard">
+            <div class="assistant-avatar">🤖</div>
+            <div class="entry-card">
+              <h2>你好！我是零件分组模板生成助手</h2>
+              <p>我会通过对话引导你创建分组模板。请选择操作方式：</p>
+              <div class="entry-actions">
+                <button id="modeDescribeBtn">描述零件类型（智能推荐参数）</button>
+                <button id="modeManualBtn">手动选择参数</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="manualPanel" class="hidden">
+            <div id="describeSamplePanel" class="block hidden">
+              <h2>描述样例</h2>
+              <div class="sample">
+                <div class="sample-intro">你可以这样描述：</div>
+                <ol class="sample-list">
+                  <li>这是一个轴类零件，我想用原点、主方向1和有主轴线这几个参数来建模板，再把它分成 A 侧和 B 侧，并按端面、外圆继续分组。</li>
+                  <li>这是一个壳体类零件，我会先选原点和6个方向参数（主方向1到主方向6），然后按加工区域把它分成周边分组和孔系分组。</li>
+                  <li>这是一个回转体类零件，参数上需要原点、主方向1和有主轴线；分组时先分 A 侧和 B 侧，再在两侧下细分外圆与端面。</li>
+                </ol>
+                <div class="sample-intro">可直接套用对应零件参数：</div>
+                <div id="describeExampleList" class="describe-example-inline-list"></div>
+              </div>
+            </div>
+
+            <div id="templateRecommendPanel" class="block hidden">
+              <h2>推荐分组模板</h2>
+              <div id="templateRecommendList" class="template-recommend-list"></div>
+            </div>
+
+            <div id="manualSelectPanel" class="block hidden">
+              <h2>第一步：选择零件级参数</h2>
+              <p class="field-tip">以下是目前所支持的全部零件级参数，请按需勾选。</p>
+              <div id="partFieldList" class="field-list"></div>
             </div>
           </div>
         </div>
 
-        <div id="manualPanel" class="hidden">
-          <div id="describeSamplePanel" class="block hidden">
-            <h2>描述样例</h2>
-            <div class="sample">
-              <div class="sample-intro">你可以这样描述：</div>
-              <ol class="sample-list">
-                <li>这是一个轴类零件，我想用原点、主方向1和有主轴线这几个参数来建模板，再把它分成 A 侧和 B 侧，并按端面、外圆继续分组。</li>
-                <li>这是一个壳体类零件，我会先选原点和6个方向参数（主方向1到主方向6），然后按加工区域把它分成周边分组和孔系分组。</li>
-                <li>这是一个回转体类零件，参数上需要原点、主方向1和有主轴线；分组时先分 A 侧和 B 侧，再在两侧下细分外圆与端面。</li>
-              </ol>
-              <div class="sample-intro">可直接套用对应零件参数：</div>
-              <div id="describeExampleList" class="describe-example-inline-list"></div>
-            </div>
-          </div>
-
-          <div id="templateRecommendPanel" class="block hidden">
-            <h2>推荐分组模板</h2>
-            <div id="templateRecommendList" class="template-recommend-list"></div>
-          </div>
-
-          <div id="manualSelectPanel" class="block hidden">
-            <h2>第一步：选择零件级参数</h2>
-            <p class="field-tip">以下是目前所支持的全部零件级参数，请按需勾选。</p>
-            <div id="partFieldList" class="field-list"></div>
-          </div>
-        </div>
+        <div id="chatLog" class="chat-log"></div>
       </div>
-
-      <div id="chatLog" class="chat-log"></div>
 
       <div class="input-dock">
         <textarea id="chatInput" placeholder="描述分组结构，如“在A侧添加外圆和端面，B侧也一样”"></textarea>
@@ -89,17 +91,17 @@
       </div>
 
       <div id="previewContent" class="right-scroll hidden">
-        <div id="partCardsSection" class="stack-card hidden">
+        <div id="partCardsSection" class="stack-card right-section-card hidden">
           <h2>已选零件级参数</h2>
           <div id="partCards"></div>
         </div>
 
-        <div class="stack-card">
+        <div class="stack-card right-section-card">
           <h2>分组结构</h2>
           <div id="tree"></div>
         </div>
 
-        <div id="groupCardsSection" class="stack-card hidden">
+        <div id="groupCardsSection" class="stack-card right-section-card hidden">
           <div class="section-head">
             <h2>分组级参数卡片（选中节点）</h2>
             <button id="groupCardsToggleBtn" class="collapse-btn" type="button">收起</button>
