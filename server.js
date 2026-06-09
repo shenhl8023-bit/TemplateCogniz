@@ -12,6 +12,7 @@ const TEMPLATE_DIR = path.join(ROOT, '分组模板');
 const FEATURE_FILE = path.join(ROOT, '特征选择列表', 'FeatureTemplate.xml');
 const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 const PROMPT_FILE = path.join(ROOT, 'prompts', 'intent_prompt.md');
+const TEMP_EXPORT_DIR = path.join(ROOT, '.codex-runtime');
 
 const SUPPORTED_PART_FIELDS = [
   '主方向',
@@ -31,6 +32,8 @@ const SUPPORTED_PART_FIELDS = [
 ];
 
 const DEFAULT_GROUP_TEMPLATE_FIELDS = ['依赖方向', '依赖方式', '特征选择'];
+const FUZZY_AUTO_APPLY_CONFIDENCE = 0.75;
+const FUZZY_CHOICE_CONFIDENCE = 0.4;
 const PART_FIELD_SPINDLE_AXIS = '有主轴线';
 const PART_FIELD_AXIS = '有轴线';
 const GROUP_FIELD_SPINDLE_FEATURE = '主轴线上特征';
@@ -858,6 +861,7 @@ function readTemplateCatalog() {
 function keywordHits(text, values) {
   const hits = [];
   const source = String(text || '').toLowerCase();
+  if (!source) return hits;
   for (const value of values || []) {
     const token = String(value || '').trim();
     if (!token) continue;
@@ -882,14 +886,32 @@ function domainKeywordHits(text, values) {
 }
 
 function inferPartTypeHits(text, item) {
-  const haystack = `${text} ${item.filename} ${item.displayName} ${item.groupNames.join(' ')} ${item.featureSelections.join(' ')}`;
+  const source = String(text || '').toLowerCase();
+  if (!source) return [];
+  const templateText = `${item.filename} ${item.displayName} ${item.groupNames.join(' ')} ${item.featureSelections.join(' ')} ${item.partTemplateFields.join(' ')} ${item.groupTemplateFields.join(' ')}`.toLowerCase();
   const rules = [
-    { label: '衬套/套类', terms: ['衬套', '套', '套类'] },
-    { label: '回转体/轴类', terms: ['回转体', '轴类', '主轴线', '外圆', '端面'] },
-    { label: '壳体/多面加工', terms: ['壳体', '箱体', '多面', '六面', '孔系', '通槽'] }
+    {
+      label: '衬套/套类',
+      textTerms: ['衬套', '套', '套类'],
+      templateTerms: ['衬套', '套类']
+    },
+    {
+      label: '回转体/轴类',
+      textTerms: ['回转体', '轴类', '主轴线', '外圆', '端面'],
+      templateTerms: ['回转体', '轴类', '主轴线', '有主轴线', '衬套']
+    },
+    {
+      label: '壳体/多面加工',
+      textTerms: ['壳体', '箱体', '多面', '六面', '孔系', '通槽'],
+      templateTerms: ['壳体', '箱体', '主方向6', '是否需要加工面分离', '方向6']
+    }
   ];
   return rules
-    .filter((rule) => rule.terms.some((term) => haystack.includes(term) && String(text || '').includes(term)))
+    .filter((rule) => {
+      const textMatched = rule.textTerms.some((term) => source.includes(term.toLowerCase()));
+      const templateMatched = rule.templateTerms.some((term) => templateText.includes(term.toLowerCase()));
+      return textMatched && templateMatched;
+    })
     .map((rule) => rule.label);
 }
 
@@ -935,8 +957,10 @@ function scoreTemplate(text, item) {
 }
 
 function recommendGroupTemplates({ text = '', catalog = readTemplateCatalog(), limit = 5 } = {}) {
+  const cleanText = String(text || '').trim();
+  if (!cleanText) return [];
   return catalog
-    .map((item) => scoreTemplate(text, item))
+    .map((item) => scoreTemplate(cleanText, item))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || b.groupCount - a.groupCount || a.filename.localeCompare(b.filename, 'zh'))
     .slice(0, limit);
@@ -1042,6 +1066,77 @@ function applyGroupTemplate(templateId, { catalog = readTemplateCatalog() } = {}
     template: publicTemplateItem(selected),
     draft,
     summary: buildGroupStructureText(draft.groups || [])
+  };
+}
+
+function fuzzyClarificationQuestion() {
+  return '这个零件更接近衬套/轴类、壳体/箱体，还是简单小件？';
+}
+
+function generateFuzzyTemplate({ text = '', limit = 3, catalog = readTemplateCatalog() } = {}) {
+  const cleanText = String(text || '').trim();
+  if (!cleanText) {
+    return {
+      ok: true,
+      mode: 'needs_clarification',
+      recommendations: [],
+      question: fuzzyClarificationQuestion()
+    };
+  }
+
+  const recommendations = recommendGroupTemplates({
+    text: cleanText,
+    catalog,
+    limit: Number(limit) || 3
+  });
+  const reliableRecommendations = recommendations.filter((item) => (item.confidence || 0) >= FUZZY_CHOICE_CONFIDENCE);
+  const top = reliableRecommendations[0] || null;
+
+  if (!top) {
+    return {
+      ok: true,
+      mode: 'needs_clarification',
+      recommendations: [],
+      question: fuzzyClarificationQuestion()
+    };
+  }
+
+  if ((top.confidence || 0) >= FUZZY_AUTO_APPLY_CONFIDENCE) {
+    const applied = applyGroupTemplate(top.id, { catalog });
+    if (!applied.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: applied.message || '应用推荐模板失败'
+      };
+    }
+
+    const xml = buildXml(applied.draft);
+    const recognitionRecommendation = recommendRecognitionTemplates({
+      text: cleanText,
+      groupTemplate: applied.template,
+      draft: applied.draft,
+      limit: 1
+    })[0] || null;
+
+    return {
+      ok: true,
+      mode: 'auto_applied',
+      recommendations: reliableRecommendations,
+      template: applied.template,
+      draft: applied.draft,
+      xml,
+      structureSummary: applied.summary,
+      recognitionRecommendation,
+      reply: `已按高匹配度样例自动生成模板「${applied.template.displayName || applied.template.filename}」。`
+    };
+  }
+
+  return {
+    ok: true,
+    mode: 'needs_choice',
+    recommendations: reliableRecommendations,
+    question: '我找到几个相近模板，请选择一个应用。'
   };
 }
 
@@ -2004,7 +2099,7 @@ function buildXml(draft) {
   return lines.join('\n');
 }
 
-function writeXmlAsGb2312(filePath, xmlText) {
+function iconvEncodeGb2312(xmlText) {
   const conv = spawnSync('iconv', ['-f', 'UTF-8', '-t', 'GB2312'], {
     input: Buffer.from(xmlText, 'utf8'),
     maxBuffer: 8 * 1024 * 1024
@@ -2012,9 +2107,79 @@ function writeXmlAsGb2312(filePath, xmlText) {
   if (conv.status !== 0 || conv.error) {
     const stderr = conv.stderr ? Buffer.from(conv.stderr).toString('utf8').trim() : '';
     const detail = conv.error ? conv.error.message : stderr || 'iconv convert failed';
-    throw new Error(`GB2312编码转换失败: ${detail}`);
+    return { ok: false, message: detail };
   }
-  fs.writeFileSync(filePath, conv.stdout);
+  return { ok: true, buffer: conv.stdout };
+}
+
+function powershellEncodeGb2312(xmlText) {
+  if (process.platform !== 'win32') {
+    return { ok: false, message: 'PowerShell GB2312 fallback is only available on Windows' };
+  }
+
+  fs.mkdirSync(TEMP_EXPORT_DIR, { recursive: true });
+  const tempId = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+  const inputPath = path.join(TEMP_EXPORT_DIR, `export_${tempId}.utf8.xml`);
+  const outputPath = path.join(TEMP_EXPORT_DIR, `export_${tempId}.gb2312.bin`);
+  fs.writeFileSync(inputPath, xmlText, 'utf8');
+
+  const script = `
+$ErrorActionPreference = 'Stop'
+$inputPath = ${JSON.stringify(inputPath)}
+$outputPath = ${JSON.stringify(outputPath)}
+try {
+  $providerType = [System.Type]::GetType('System.Text.CodePagesEncodingProvider')
+  if ($providerType) {
+    [System.Text.Encoding]::RegisterProvider($providerType::Instance)
+  }
+} catch {}
+$text = [System.IO.File]::ReadAllText($inputPath, [System.Text.Encoding]::UTF8)
+$encoding = [System.Text.Encoding]::GetEncoding('GB2312')
+[System.IO.File]::WriteAllBytes($outputPath, $encoding.GetBytes($text))
+`;
+
+  try {
+    const encodedCommand = Buffer.from(script, 'utf16le').toString('base64');
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-EncodedCommand',
+      encodedCommand
+    ], { maxBuffer: 8 * 1024 * 1024 });
+
+    if (result.status !== 0 || result.error) {
+      const stderr = result.stderr ? Buffer.from(result.stderr).toString('utf8').trim() : '';
+      const detail = result.error ? result.error.message : stderr || 'PowerShell convert failed';
+      return { ok: false, message: detail };
+    }
+    return { ok: true, buffer: fs.readFileSync(outputPath) };
+  } finally {
+    for (const tempPath of [inputPath, outputPath]) {
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch (_) {}
+    }
+  }
+}
+
+function writeXmlAsGb2312(filePath, xmlText) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  const iconvResult = iconvEncodeGb2312(xmlText);
+  if (iconvResult.ok) {
+    fs.writeFileSync(filePath, iconvResult.buffer);
+    return;
+  }
+
+  const powershellResult = powershellEncodeGb2312(xmlText);
+  if (powershellResult.ok) {
+    fs.writeFileSync(filePath, powershellResult.buffer);
+    return;
+  }
+
+  throw new Error(`GB2312编码转换失败: ${iconvResult.message}; ${powershellResult.message}`);
 }
 
 function validateBasicXml(xml) {
@@ -2091,6 +2256,20 @@ const server = http.createServer((req, res) => {
         limit: Number(parsed.limit) || 5
       });
       sendJson(res, 200, { ok: true, recommendations });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/templates/generate-fuzzy') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      const parsed = safeJsonParse(body) || {};
+      const result = generateFuzzyTemplate({
+        text: String(parsed.text || parsed.message || '').trim(),
+        limit: Number(parsed.limit) || 3
+      });
+      sendJson(res, result.ok ? 200 : 400, result);
     });
     return;
   }
@@ -2295,6 +2474,7 @@ module.exports = {
   readFeatures,
   readTemplateCatalog,
   recommendGroupTemplates,
+  generateFuzzyTemplate,
   listRecognitionTemplates,
   recommendRecognitionTemplates,
   applyGroupTemplate,

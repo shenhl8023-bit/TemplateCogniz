@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 
 process.env.NO_LISTEN = '1';
@@ -65,6 +66,22 @@ test('group template API recommends templates with reasons', async () => {
   }
 });
 
+test('group template API returns no recommendations for blank text', async () => {
+  const { instance, baseUrl } = await listen();
+  try {
+    const { resp, data } = await requestJson(baseUrl, '/api/group-templates/recommend', {
+      method: 'POST',
+      body: JSON.stringify({ text: '   ', limit: 3 })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.deepEqual(data.recommendations, []);
+  } finally {
+    await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
 test('group template API applies selected recommendation to draft', async () => {
   const { instance, baseUrl } = await listen();
   try {
@@ -89,6 +106,103 @@ test('group template API applies selected recommendation to draft', async () => 
     assert.ok(data.structureSummary.length > 0);
     assert.equal(data.recognitionRecommendation.id, 'rotary_recognition');
   } finally {
+    await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
+test('fuzzy template API auto-applies high confidence vague descriptions', async () => {
+  const { instance, baseUrl } = await listen();
+  try {
+    const { resp, data } = await requestJson(baseUrl, '/api/templates/generate-fuzzy', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: '衬套类回转体零件，A侧和B侧，包含端面、外圆、孔和外环槽',
+        limit: 3
+      })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.mode, 'auto_applied');
+    assert.ok(data.template);
+    assert.ok(data.template.id);
+    assert.ok(data.draft.groups.length > 0);
+    assert.ok(data.xml.includes('<Kmsoft>'));
+    assert.ok(data.structureSummary.length > 0);
+    assert.equal(data.recognitionRecommendation.id, 'rotary_recognition');
+    assert.match(data.reply, /自动生成模板/);
+  } finally {
+    await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
+test('fuzzy template API asks users to choose medium confidence descriptions', async () => {
+  const { instance, baseUrl } = await listen();
+  try {
+    const { resp, data } = await requestJson(baseUrl, '/api/templates/generate-fuzzy', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: '做个衬套模板',
+        limit: 3
+      })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.mode, 'needs_choice');
+    assert.ok(data.recommendations.length > 0);
+    assert.ok(data.recommendations[0].confidence >= 0.4);
+    assert.ok(data.recommendations[0].confidence < 0.75);
+    assert.equal(data.draft, undefined);
+    assert.match(data.question, /选择/);
+  } finally {
+    await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
+test('fuzzy template API asks a clarification question for low confidence descriptions', async () => {
+  const { instance, baseUrl } = await listen();
+  try {
+    const { resp, data } = await requestJson(baseUrl, '/api/templates/generate-fuzzy', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: '帮我做一个差不多能用的模板',
+        limit: 3
+      })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.mode, 'needs_clarification');
+    assert.equal(data.recommendations.length, 0);
+    assert.equal(data.draft, undefined);
+    assert.match(data.question, /衬套|壳体|小件/);
+  } finally {
+    await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
+test('save API exports the current draft as a real XML file', async () => {
+  const { instance, baseUrl } = await listen();
+  let exportedPath = null;
+  try {
+    const init = await requestJson(baseUrl, '/api/init');
+
+    const { resp, data } = await requestJson(baseUrl, '/api/save', {
+      method: 'POST',
+      body: JSON.stringify({ draft: init.data.draft })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.match(data.filename, /^分组模板_\d{8}_\d{6}\.xml$/);
+    assert.ok(data.filePath.endsWith(data.filename));
+    assert.ok(data.xml.includes('<?xml version="1.0" encoding="GB2312" ?>'));
+    assert.ok(data.xml.includes('<Kmsoft>'));
+    exportedPath = data.filePath;
+    assert.ok(fs.existsSync(exportedPath));
+  } finally {
+    if (exportedPath && fs.existsSync(exportedPath)) fs.unlinkSync(exportedPath);
     await new Promise((resolve) => instance.close(resolve));
   }
 });

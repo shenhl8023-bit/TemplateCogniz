@@ -45,6 +45,24 @@ test('recommendGroupTemplates ranks sleeve and rotary templates from text', () =
   assert.match(`${top.displayName} ${top.filename} ${top.reasons.join(' ')}`, /衬套|回转体|外圆|孔|端面/);
 });
 
+test('recommendGroupTemplates returns no recommendations for blank text', () => {
+  const catalog = readTemplateCatalog();
+  const recommendations = recommendGroupTemplates({ text: '   ', catalog });
+
+  assert.deepEqual(recommendations, []);
+});
+
+test('recommendGroupTemplates prefers housing templates for housing descriptions', () => {
+  const catalog = readTemplateCatalog();
+  const recommendations = recommendGroupTemplates({
+    text: '壳体类多面加工零件，包含六个主方向、平面、孔系、通槽和凹槽',
+    catalog
+  });
+
+  assert.ok(recommendations.length > 0);
+  assert.match(recommendations[0].filename, /壳体|临时壳体/);
+});
+
 test('applyGroupTemplate converts selected template into editable draft and XML', () => {
   const catalog = readTemplateCatalog();
   const selected = recommendGroupTemplates({

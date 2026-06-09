@@ -1,5 +1,5 @@
 import { state, findNodeById } from './store.js';
-import { apiApplyGroupTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
+import { apiApplyGroupTemplate, apiGenerateFuzzyTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
 import { AIService } from './ai-service.js';
 import { ChatEngine } from './chat-engine.js';
 import { renderTree } from './tree-view.js';
@@ -84,6 +84,7 @@ let chatView = null;
 let refreshSeq = 0;
 let groupEditState = { nodeId: null, values: {} };
 let groupCardsCollapsedByUser = false;
+let exportInProgress = false;
 const expandedNodeIds = new Set();
 const DRAFT_CACHE_KEY = 'group_template_draft_cache_v1';
 const DEFAULT_GROUP_FIELDS = ['依赖方向', '依赖方式', '特征选择'];
@@ -391,6 +392,48 @@ async function applyRecommendedTemplate(templateId) {
   }
 }
 
+async function handleFuzzyTemplateGeneration(text) {
+  if (!text || !text.trim()) return false;
+  try {
+    const data = await apiGenerateFuzzyTemplate(text.trim(), 3);
+
+    if (data.mode === 'auto_applied') {
+      state.draft = adoptServerDraft(data.draft);
+      state.selectedGroupTemplate = data.template || null;
+      state.selectedRecognitionTemplate = data.recognitionRecommendation || null;
+      state.templateRecommendations = [];
+      state.selectedNodeId = null;
+      expandedNodeIds.clear();
+      setXml(data.xml || '');
+      renderAll();
+      chatView.addMessage('bot', data.reply || '已按描述自动生成模板。');
+      if (state.selectedRecognitionTemplate) {
+        chatView.addMessage('bot', `已选择自动识别模板「${state.selectedRecognitionTemplate.name}」。`);
+      }
+      chatView.addMessage('system', `当前分组结构：\n${data.structureSummary || '(暂无分组)'}`);
+      persistDraftCache();
+      return true;
+    }
+
+    if (data.mode === 'needs_choice') {
+      state.templateRecommendations = data.recommendations || [];
+      renderTemplateRecommendations();
+      chatView.addMessage('bot', data.question || '我找到几个相近模板，请选择一个应用。');
+      return true;
+    }
+
+    if (data.mode === 'needs_clarification') {
+      state.templateRecommendations = [];
+      renderTemplateRecommendations();
+      chatView.addMessage('bot', data.question || '请补充零件类型或典型特征。');
+      return true;
+    }
+  } catch (e) {
+    chatView.addMessage('system', `模糊生成失败，继续按普通指令解析：${e.message}`);
+  }
+  return false;
+}
+
 function renderAll() {
   if (state.selectedNodeId && !findNodeById(state.draft.groups, state.selectedNodeId)) {
     state.selectedNodeId = null;
@@ -540,6 +583,12 @@ async function sendChat() {
   chatView.clearInput();
   chatView.addMessage('user', text);
   if (state.modeType === 'describe') {
+    const fuzzyHandled = await handleFuzzyTemplateGeneration(text);
+    if (fuzzyHandled) {
+      chatView.setInputEnabled(true, '描述分组结构，如“在A侧添加外圆和端面，B侧也一样”');
+      chatView.focusInput();
+      return;
+    }
     recommendTemplatesFromText(text);
   }
   const pending = chatView.addPendingMessage('LLM等待中（已等待 0 秒）');
@@ -586,12 +635,27 @@ async function sendChat() {
 }
 
 async function saveDraft() {
-  const data = await apiSave(state.draft);
-  if (!data.ok) {
-    chatView.addMessage('bot', `保存失败：${(data.errors || []).join('；')}`);
-    return;
+  if (exportInProgress) return;
+  exportInProgress = true;
+  if (els.exportTemplateBtn) els.exportTemplateBtn.disabled = true;
+  if (els.saveBtn) els.saveBtn.disabled = true;
+
+  try {
+    const data = await apiSave(state.draft);
+    if (!data.ok) {
+      const detail = data.message || (Array.isArray(data.errors) && data.errors.join('；')) || '未知错误';
+      chatView.addMessage('bot', `保存失败：${detail}`);
+      return;
+    }
+    setXml(data.xml || '');
+    chatView.addMessage('bot', `已导出模板：${data.filename}\n导出路径：${data.filePath}`);
+  } catch (err) {
+    chatView.addMessage('bot', `保存失败：${err.message || '网络请求失败'}`);
+  } finally {
+    exportInProgress = false;
+    if (els.exportTemplateBtn) els.exportTemplateBtn.disabled = false;
+    if (els.saveBtn) els.saveBtn.disabled = false;
   }
-  chatView.addMessage('bot', `已导出模板：${data.filename}\n导出路径：${data.filePath}`);
 }
 
 function bindEvents() {

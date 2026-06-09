@@ -52,6 +52,17 @@ export async function apiApplyGroupTemplate(templateId) {
   return data;
 }
 
+export async function apiGenerateFuzzyTemplate(text, limit = 3) {
+  const resp = await fetch('/api/templates/generate-fuzzy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, limit })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.message || `fuzzy template generation failed: ${resp.status}`);
+  return data;
+}
+
 export async function apiGetSettings() {
   const resp = await fetch('/api/settings');
   if (!resp.ok) throw new Error(`settings failed: ${resp.status}`);
