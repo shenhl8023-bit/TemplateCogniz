@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Kmsoft>
+    <Item type="Part_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="原点" title="原点" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+                <Item name="主方向1" title="主方向1" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+                <Item name="有主轴线" title="有主轴线" value="是" data_type="" visible="1" edit="1" type="Multi" defaultval="是|是;不是" respath="" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item type="Group_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="依赖方向" title="依赖方向" value="任意方向" data_type="" visible="1" edit="1" type="Multi" defaultval="任意方向|从父;主方向1;任意方向" respath="" />
+                <Item name="依赖方式" title="依赖方式" value="" data_type="" visible="1" edit="1" type="Multi" defaultval="|无;相同;相反;平行;平行且在同侧;平行且在反侧;垂直;不平行;接近;接近反向" respath="" />
+                <Item name="主轴线上特征" title="主轴线上特征" value="无关" data_type="" visible="1" edit="1" type="Multi" defaultval="无关|无关;是;不是" respath="" />
+                <Item name="特征选择" title="特征选择" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="kmfeatype" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item id="8f678b931e854e6089015ccb234b542" type="Part" filename="JRT148-16-02放油活门.prt">
+        <Params>
+            <param name="原点" value="" />
+            <param name="主方向1" value="" />
+            <param name="有主轴线" value="是" />
+        </Params>
+        <Item id="2db71e866ce846e6b9456e194d2ecedb" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="A侧" />
+                <param name="依赖方向" value="主方向1" />
+                <param name="依赖方式" value="平行且在同侧" />
+                <param name="主轴线上特征" value="是" />
+                <param name="特征选择" value="轴端面,外圆柱面,U形外环槽,外倒角,回转面倒圆" />
+            </Params>
+        </Item>
+        <Item id="107a28453bbc48379ad5e01c5a93f836" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="B侧" />
+                <param name="依赖方向" value="主方向1" />
+                <param name="依赖方式" value="平行且在反侧" />
+                <param name="主轴线上特征" value="是" />
+                <param name="特征选择" value="轴端面,外圆柱面,U形外环槽,外倒角,回转面倒圆" />
+            </Params>
+        </Item>
+        <Item id="61fa813c8a8e465492eb8d8923328846" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="中间孔" />
+                <param name="依赖方向" value="主方向1" />
+                <param name="依赖方式" value="无" />
+                <param name="主轴线上特征" value="无关" />
+                <param name="特征选择" value="孔,孔(通孔)" />
+            </Params>
+        </Item>
+    </Item>
+</Kmsoft>

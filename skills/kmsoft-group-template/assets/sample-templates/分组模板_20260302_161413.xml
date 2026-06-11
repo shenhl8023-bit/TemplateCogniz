@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Kmsoft>
+    <Item type="Part_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="原点" title="原点" value="" data_type="point" visible="1" edit="1" type="String" defaultval="" respath="" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item type="Group_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="依赖方向" title="依赖方向" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="" />
+                <Item name="依赖方式" title="依赖方式" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="" />
+                <Item name="特征选择" title="特征选择" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item id="20260302161413_part" type="Part" filename="">
+        <Params>
+            <param name="原点" value="" />
+        </Params>
+        <Item id="20260302161413_group_a" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="A侧" />
+                <param name="依赖方向" value="任意方向" />
+                <param name="依赖方式" value="无" />
+                <param name="特征选择" value="" />
+            </Params>
+        </Item>
+    </Item>
+</Kmsoft>

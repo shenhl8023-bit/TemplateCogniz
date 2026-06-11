@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Kmsoft>
+    <Item type="Part_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="原点" title="原点" value="" data_type="point" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+                <Item name="主方向1" title="主方向1" value="" data_type="direction" visible="1" edit="1" type="String" defaultval="" respath="cad" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item type="Group_Template">
+        <GridPropList>
+            <GridProp name="节点配置">
+                <Item name="依赖方向" title="依赖方向" value="" data_type="" visible="1" edit="1" type="Multi" defaultval="任意方向|任意方向;从父;主方向1;主方向2;主方向3;主方向4;主方向5;主方向6;外圆加工方向;多外圆加工方向;六面方向;无可行方向;无可行加工方向;未配置" respath="" />
+                <Item name="依赖方式" title="依赖方式" value="" data_type="" visible="1" edit="1" type="Multi" defaultval="无|无;相同;相反;平行;平行且在同侧;平行且在反侧;垂直;不平行;接近;接近反向;与坐标轴方向不平行;相同或接近;相反或接近反向" respath="" />
+                <Item name="特征选择" title="特征选择" value="" data_type="" visible="1" edit="1" type="String" defaultval="" respath="kmfeatype" />
+            </GridProp>
+        </GridPropList>
+    </Item>
+    <Item id="b726a749331e47d88444983381ee5cf7" type="Part" filename="" >
+        <Params>
+            <param name="原点" value="" />
+            <param name="主方向1" value="" />
+        </Params>
+        <Item id="066183715b7f496e858ffb64832d4369" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="A 侧" />
+                <param name="依赖方向" value="任意方向" />
+                <param name="依赖方式" value="无" />
+                <param name="特征选择" value="" />
+            </Params>
+            <Item id="86c5f6798bb3427bbab481057eab35d4" type="Group" stageOrders="" sourceIds="">
+                <Params>
+                    <param name="名称" value="外圆" />
+                    <param name="依赖方向" value="从父" />
+                    <param name="依赖方式" value="无" />
+                    <param name="特征选择" value="外圆柱面" />
+                </Params>
+            </Item>
+            <Item id="ef33439b233242419018e03c3b976bb2" type="Group" stageOrders="" sourceIds="">
+                <Params>
+                    <param name="名称" value="端面" />
+                    <param name="依赖方向" value="从父" />
+                    <param name="依赖方式" value="无" />
+                    <param name="特征选择" value="轴端面,平面" />
+                </Params>
+            </Item>
+        </Item>
+        <Item id="59c081b077354d0b99ee2b8c88d54b97" type="Group" stageOrders="" sourceIds="">
+            <Params>
+                <param name="名称" value="B 侧" />
+                <param name="依赖方向" value="任意方向" />
+                <param name="依赖方式" value="无" />
+                <param name="特征选择" value="" />
+            </Params>
+            <Item id="7c693bc00464471189031816339c7939" type="Group" stageOrders="" sourceIds="">
+                <Params>
+                    <param name="名称" value="外圆" />
+                    <param name="依赖方向" value="从父" />
+                    <param name="依赖方式" value="无" />
+                    <param name="特征选择" value="外圆柱面" />
+                </Params>
+            </Item>
+            <Item id="48fa9eddd9f44d6782cce5ddc1f68cf9" type="Group" stageOrders="" sourceIds="">
+                <Params>
+                    <param name="名称" value="端面" />
+                    <param name="依赖方向" value="从父" />
+                    <param name="依赖方式" value="无" />
+                    <param name="特征选择" value="轴端面,平面" />
+                </Params>
+            </Item>
+        </Item>
+    </Item>
+</Kmsoft>
