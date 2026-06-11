@@ -1,90 +1,104 @@
+async function requestJson(url, options = {}) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!resp.ok) {
+    const detail = data.message || (Array.isArray(data.errors) ? data.errors.join('；') : '');
+    throw new Error(detail || `request failed: ${resp.status}`);
+  }
+  return data;
+}
+
 export async function apiInit() {
-  const resp = await fetch('/api/init');
-  if (!resp.ok) throw new Error(`init failed: ${resp.status}`);
-  return resp.json();
+  return requestJson('/api/init');
 }
 
 export async function apiChat(draft, message) {
-  const resp = await fetch('/api/chat', {
+  return requestJson('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ draft, message })
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.message || `chat failed: ${resp.status}`);
-  return data;
 }
 
 export async function apiSave(draft) {
-  const resp = await fetch('/api/save', {
+  return requestJson('/api/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ draft })
   });
-  return resp.json();
 }
 
 export async function apiListGroupTemplates() {
-  const resp = await fetch('/api/group-templates');
-  if (!resp.ok) throw new Error(`group template list failed: ${resp.status}`);
-  return resp.json();
+  return requestJson('/api/group-templates');
 }
 
 export async function apiRecommendGroupTemplates(text, limit = 5) {
-  const resp = await fetch('/api/group-templates/recommend', {
+  return requestJson('/api/group-templates/recommend', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, limit })
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.message || `template recommend failed: ${resp.status}`);
-  return data;
 }
 
 export async function apiApplyGroupTemplate(templateId) {
-  const resp = await fetch('/api/group-templates/apply', {
+  return requestJson('/api/group-templates/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ templateId })
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.message || `template apply failed: ${resp.status}`);
-  return data;
+}
+
+export async function apiAgentMessage(message, sessionId = '', limit = 3) {
+  return requestJson('/api/agent/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, sessionId, limit })
+  });
+}
+
+export async function apiAgentEvent(event) {
+  return requestJson('/api/agent/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event || {})
+  });
 }
 
 export async function apiGenerateFuzzyTemplate(text, limit = 3) {
-  const resp = await fetch('/api/templates/generate-fuzzy', {
+  return requestJson('/api/templates/generate-fuzzy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, limit })
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.message || `fuzzy template generation failed: ${resp.status}`);
-  return data;
 }
 
 export async function apiGetSettings() {
-  const resp = await fetch('/api/settings');
-  if (!resp.ok) throw new Error(`settings failed: ${resp.status}`);
-  return resp.json();
+  return requestJson('/api/settings');
 }
 
 export async function apiSaveSettings(settings) {
-  const resp = await fetch('/api/settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ settings })
-  });
-  const data = await resp.json();
-  return { ok: resp.ok && data.ok, data };
+  try {
+    const data = await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings })
+    });
+    return { ok: !!data.ok, data };
+  } catch (e) {
+    return { ok: false, data: { ok: false, message: e.message } };
+  }
 }
 
 export async function apiTestSettings(settings) {
-  const resp = await fetch('/api/settings/test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ settings })
-  });
-  const data = await resp.json();
-  return { ok: resp.ok, data };
+  try {
+    const data = await requestJson('/api/settings/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings })
+    });
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, data: { ok: false, message: e.message } };
+  }
 }

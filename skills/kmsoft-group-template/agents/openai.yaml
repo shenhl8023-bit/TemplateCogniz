@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kmsoft Group Template Selection"
+  short_description: "Recommend and confirm a Kmsoft/MPS 分组模板."
+  default_prompt: "Use $kmsoft-group-template to recommend clickable 分组模板 candidates from my Chinese part description, wait for my selected template, then confirm it and return the draft/XML handoff payload. Omit large inline draft/XML fields when file artifacts are enough."

@@ -1,5 +1,5 @@
 import { state, findNodeById } from './store.js';
-import { apiApplyGroupTemplate, apiGenerateFuzzyTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
+import { apiAgentEvent, apiAgentMessage, apiApplyGroupTemplate, apiGenerateFuzzyTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
 import { AIService } from './ai-service.js';
 import { ChatEngine } from './chat-engine.js';
 import { renderTree } from './tree-view.js';
@@ -275,12 +275,75 @@ function renderDescribeExampleList() {
   }
 }
 
+function workflowStatusText(status) {
+  const map = {
+    pending: '未开始',
+    needs_input: '等待输入',
+    awaiting_choice: '等待选择',
+    running: '生成中',
+    completed: '已完成',
+    failed: '失败'
+  };
+  return map[status] || status || '未开始';
+}
+
+function workflowStatusClass(status) {
+  if (status === 'completed') return 'completed';
+  if (status === 'awaiting_choice' || status === 'needs_input') return 'waiting';
+  if (status === 'running') return 'running';
+  if (status === 'failed') return 'failed';
+  return 'pending';
+}
+
+function renderAgentWorkflow() {
+  const workflow = state.agentWorkflow;
+  if (!workflow || !Array.isArray(workflow.steps) || workflow.steps.length === 0) return null;
+
+  const card = document.createElement('div');
+  card.className = 'agent-workflow-card';
+
+  const title = document.createElement('div');
+  title.className = 'agent-workflow-title';
+  title.textContent = '选择分组模板';
+  card.appendChild(title);
+
+  const list = document.createElement('div');
+  list.className = 'agent-workflow-list';
+  workflow.steps.forEach((step, index) => {
+    const row = document.createElement('div');
+    row.className = `agent-workflow-step ${workflowStatusClass(step.status)}`;
+
+    const indexEl = document.createElement('div');
+    indexEl.className = 'agent-workflow-index';
+    indexEl.textContent = String(index + 1);
+    row.appendChild(indexEl);
+
+    const name = document.createElement('div');
+    name.className = 'agent-workflow-name';
+    name.textContent = step.title || step.id;
+    row.appendChild(name);
+
+    const status = document.createElement('div');
+    status.className = 'agent-workflow-status';
+    status.textContent = workflowStatusText(step.status);
+    row.appendChild(status);
+
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+  return card;
+}
+
 function renderTemplateRecommendations() {
   if (!els.templateRecommendPanel || !els.templateRecommendList) return;
   const recommendations = Array.isArray(state.templateRecommendations) ? state.templateRecommendations : [];
   const recognition = state.selectedRecognitionTemplate;
-  els.templateRecommendPanel.classList.toggle('hidden', recommendations.length === 0 && !recognition);
+  const workflowCard = renderAgentWorkflow();
+  els.templateRecommendPanel.classList.toggle('hidden', recommendations.length === 0 && !recognition && !workflowCard);
   els.templateRecommendList.innerHTML = '';
+  if (workflowCard) {
+    els.templateRecommendList.appendChild(workflowCard);
+  }
   if (recognition) {
     const recCard = document.createElement('div');
     recCard.className = 'template-recommend-item recognition-template-item';
@@ -350,7 +413,7 @@ function renderTemplateRecommendations() {
     actions.className = 'template-recommend-actions';
     const applyBtn = document.createElement('button');
     applyBtn.type = 'button';
-    applyBtn.textContent = state.selectedGroupTemplate && state.selectedGroupTemplate.id === item.id ? '已应用' : '应用模板';
+    applyBtn.textContent = state.selectedGroupTemplate && state.selectedGroupTemplate.id === item.id ? '已确认' : '选择模板';
     applyBtn.disabled = state.selectedGroupTemplate && state.selectedGroupTemplate.id === item.id;
     applyBtn.addEventListener('click', () => applyRecommendedTemplate(item.id));
     actions.appendChild(applyBtn);
@@ -371,19 +434,58 @@ async function recommendTemplatesFromText(text) {
   }
 }
 
+function applyAgentResponseState(data) {
+  state.agentSession = data.session || (data.sessionId ? { id: data.sessionId } : null);
+  state.agentWorkflow = data.workflow || null;
+  const candidatePanel = Array.isArray(data.ui)
+    ? data.ui.find((item) => item && item.type === 'template_candidates')
+    : null;
+  if (candidatePanel && Array.isArray(candidatePanel.options)) {
+    state.templateRecommendations = candidatePanel.options;
+  } else if (Array.isArray(data.recommendations)) {
+    state.templateRecommendations = data.recommendations;
+  }
+}
+
+async function requestAgentTemplateSelection(text) {
+  if (!text || !text.trim()) return false;
+  try {
+    const data = await apiAgentMessage(text.trim(), state.agentSession && state.agentSession.id, 3);
+    applyAgentResponseState(data);
+    renderTemplateRecommendations();
+    chatView.addMessage('bot', data.reply || '我找到几个接近的分组模板，请选择一个作为基础。');
+    return true;
+  } catch (e) {
+    chatView.addMessage('system', `智能体选择分组模板失败：${e.message}`);
+    return false;
+  }
+}
+
 async function applyRecommendedTemplate(templateId) {
   if (!templateId) return;
   try {
-    const data = await apiApplyGroupTemplate(templateId);
+    const useAgentEvent = !!(state.agentSession && state.agentSession.id);
+    const data = useAgentEvent
+      ? await apiAgentEvent({
+        type: 'ui.option_selected',
+        sessionId: state.agentSession.id,
+        stage: 'TemplateSelection',
+        choiceId: templateId,
+        payload: { templateId }
+      })
+      : await apiApplyGroupTemplate(templateId);
+    if (data.workflow || data.session || data.ui) {
+      applyAgentResponseState(data);
+    }
     state.draft = adoptServerDraft(data.draft);
     state.selectedGroupTemplate = data.template || null;
-    state.selectedRecognitionTemplate = data.recognitionRecommendation || null;
+    state.selectedRecognitionTemplate = useAgentEvent ? null : (data.recognitionRecommendation || null);
     state.selectedNodeId = null;
     expandedNodeIds.clear();
     setXml(data.xml);
     renderAll();
-    chatView.addMessage('bot', `已应用分组模板「${data.template.displayName || data.template.filename}」。`);
-    if (state.selectedRecognitionTemplate) {
+    chatView.addMessage('bot', data.reply || `已应用分组模板「${data.template.displayName || data.template.filename}」。`);
+    if (!useAgentEvent && state.selectedRecognitionTemplate) {
       chatView.addMessage('bot', `已选择自动识别模板「${state.selectedRecognitionTemplate.name}」。`);
     }
     chatView.addMessage('system', `当前分组结构：\n${data.structureSummary || '(暂无分组)'}`);
@@ -583,8 +685,8 @@ async function sendChat() {
   chatView.clearInput();
   chatView.addMessage('user', text);
   if (state.modeType === 'describe') {
-    const fuzzyHandled = await handleFuzzyTemplateGeneration(text);
-    if (fuzzyHandled) {
+    const agentHandled = await requestAgentTemplateSelection(text);
+    if (agentHandled) {
       chatView.setInputEnabled(true, '描述分组结构，如“在A侧添加外圆和端面，B侧也一样”');
       chatView.focusInput();
       return;
@@ -807,6 +909,8 @@ export async function initApp() {
   state.scenePresets = data.scenePresets || [];
   state.groupTemplates = data.groupTemplates || [];
   state.templateRecommendations = [];
+  state.agentSession = null;
+  state.agentWorkflow = null;
   state.selectedGroupTemplate = null;
   state.selectedRecognitionTemplate = null;
   state.supportedPartFields = data.supportedPartFields || [];

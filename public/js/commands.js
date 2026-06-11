@@ -6,14 +6,21 @@ const PART_FIELD_AXIS = '有轴线';
 const GROUP_FIELD_SPINDLE_FEATURE = '主轴线上特征';
 const GROUP_FIELD_GENERAL_AXIS_FEATURE = '一般轴线上特征';
 
+function containsNodeId(node, id) {
+  if (!node || !id) return false;
+  if (node.id === id) return true;
+  return (node.children || []).some((child) => containsNodeId(child, id));
+}
+
 export function moveNodeAsChild(groups, movingId, targetId) {
-  if (!movingId || movingId === targetId) return false;
+  if (!movingId || !targetId || movingId === targetId) return false;
   const moving = findNodeById(groups, movingId);
   if (!moving) return false;
-  const removed = removeNode(groups, movingId);
-  if (!removed) return false;
   const target = findNodeById(groups, targetId);
   if (!target) return false;
+  if (containsNodeId(moving, targetId)) return false;
+  const removed = removeNode(groups, movingId);
+  if (!removed) return false;
   target.children = target.children || [];
   target.children.push(moving);
   return true;

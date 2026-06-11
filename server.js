@@ -13,6 +13,11 @@ const FEATURE_FILE = path.join(ROOT, '特征选择列表', 'FeatureTemplate.xml'
 const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 const PROMPT_FILE = path.join(ROOT, 'prompts', 'intent_prompt.md');
 const TEMP_EXPORT_DIR = path.join(ROOT, '.codex-runtime');
+const DEFAULT_JSON_BODY_LIMIT_BYTES = 1024 * 1024;
+const CONFIGURED_JSON_BODY_LIMIT_BYTES = Number(process.env.JSON_BODY_LIMIT_BYTES);
+const MAX_JSON_BODY_BYTES = Number.isFinite(CONFIGURED_JSON_BODY_LIMIT_BYTES) && CONFIGURED_JSON_BODY_LIMIT_BYTES > 0
+  ? CONFIGURED_JSON_BODY_LIMIT_BYTES
+  : DEFAULT_JSON_BODY_LIMIT_BYTES;
 
 const SUPPORTED_PART_FIELDS = [
   '主方向',
@@ -636,6 +641,50 @@ function safeJsonParse(text) {
   }
 }
 
+function jsonBodyError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function readJsonBody(req, { maxBytes = MAX_JSON_BODY_BYTES } = {}) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let bytes = 0;
+    let rejected = false;
+
+    req.on('data', (chunk) => {
+      if (rejected) return;
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        rejected = true;
+        reject(jsonBodyError(413, `请求体过大，最大允许 ${maxBytes} 字节`));
+        return;
+      }
+      body += chunk.toString('utf8');
+    });
+
+    req.on('end', () => {
+      if (rejected) return;
+      const trimmed = body.trim();
+      if (!trimmed) {
+        resolve({});
+        return;
+      }
+      const parsed = safeJsonParse(trimmed);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        reject(jsonBodyError(400, '请求 JSON 格式无效'));
+        return;
+      }
+      resolve(parsed);
+    });
+
+    req.on('error', (e) => {
+      if (!rejected) reject(jsonBodyError(400, `读取请求失败：${e.message}`));
+    });
+  });
+}
+
 function sendJson(res, code, payload) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
@@ -1140,6 +1189,193 @@ function generateFuzzyTemplate({ text = '', limit = 3, catalog = readTemplateCat
   };
 }
 
+const AGENT_STAGE_TEMPLATE_SELECTION = 'TemplateSelection';
+const AGENT_WORKFLOW_STEPS = [
+  { id: 'select_group_template', title: '选择分组模板' }
+];
+const agentSessions = new Map();
+
+function createAgentSessionId() {
+  return `agent_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+function createAgentWorkflow({
+  currentStep = 'select_group_template',
+  selectGroupTemplateStatus = 'pending'
+} = {}) {
+  return {
+    currentStep,
+    steps: AGENT_WORKFLOW_STEPS.map((step, index) => ({
+      ...step,
+      status: index === 0 ? selectGroupTemplateStatus : 'pending'
+    }))
+  };
+}
+
+function templateCandidateOption(item, selectedTemplateId = '') {
+  return {
+    id: item.id,
+    choiceId: item.id,
+    templateId: item.id,
+    title: item.displayName || item.filename,
+    filename: item.filename,
+    confidence: item.confidence || 0,
+    score: item.score || 0,
+    reasons: item.reasons || [],
+    groupCount: item.groupCount || 0,
+    depth: item.depth || 0,
+    groupNames: item.groupNames || [],
+    featureSelections: item.featureSelections || [],
+    selected: !!selectedTemplateId && selectedTemplateId === item.id
+  };
+}
+
+function templateSelectionUi(recommendations, selectedTemplateId = '') {
+  if (!recommendations.length) return [];
+  return [
+    {
+      type: 'template_candidates',
+      stage: AGENT_STAGE_TEMPLATE_SELECTION,
+      title: '请选择分组模板',
+      options: recommendations.map((item) => templateCandidateOption(item, selectedTemplateId))
+    }
+  ];
+}
+
+function upsertAgentSession(sessionId, patch) {
+  const existing = sessionId ? agentSessions.get(sessionId) : null;
+  const now = new Date().toISOString();
+  const session = {
+    id: existing ? existing.id : (sessionId || createAgentSessionId()),
+    createdAt: existing ? existing.createdAt : now,
+    updatedAt: now,
+    stage: AGENT_STAGE_TEMPLATE_SELECTION,
+    message: '',
+    recommendations: [],
+    selectedTemplate: null,
+    draft: null,
+    xml: '',
+    structureSummary: '',
+    workflow: createAgentWorkflow(),
+    ...(existing || {}),
+    ...(patch || {})
+  };
+  session.updatedAt = now;
+  agentSessions.set(session.id, session);
+  return session;
+}
+
+function publicAgentSession(session) {
+  if (!session) return null;
+  return {
+    id: session.id,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    stage: session.stage,
+    message: session.message,
+    selectedTemplate: session.selectedTemplate,
+    structureSummary: session.structureSummary,
+    workflow: session.workflow
+  };
+}
+
+function createTemplateSelectionAgentResponse({ text = '', sessionId = '', limit = 3 } = {}) {
+  const message = String(text || '').trim();
+  const rawRecommendations = message
+    ? recommendGroupTemplates({ text: message, limit: Math.max(Number(limit) || 3, 5) })
+    : [];
+  const recommendations = rawRecommendations
+    .slice(0, Number(limit) || 3);
+  const hasCandidates = recommendations.length > 0;
+  const workflow = createAgentWorkflow({
+    currentStep: 'select_group_template',
+    selectGroupTemplateStatus: hasCandidates ? 'awaiting_choice' : 'needs_input'
+  });
+  const session = upsertAgentSession(sessionId, {
+    stage: AGENT_STAGE_TEMPLATE_SELECTION,
+    message,
+    recommendations,
+    selectedTemplate: null,
+    workflow
+  });
+
+  return {
+    ok: true,
+    sessionId: session.id,
+    stage: AGENT_STAGE_TEMPLATE_SELECTION,
+    reply: hasCandidates
+      ? '我找到几个接近的分组模板，请选择一个作为基础。'
+      : '我还需要更多零件类型、加工侧或典型特征信息，才能推荐分组模板。',
+    workflow,
+    ui: templateSelectionUi(recommendations),
+    recommendations,
+    session: publicAgentSession(session)
+  };
+}
+
+function applyTemplateSelectionEvent({ sessionId = '', templateId = '' } = {}) {
+  const session = sessionId ? agentSessions.get(sessionId) : null;
+  const selectedTemplateId = String(templateId || '').trim();
+  if (!selectedTemplateId) {
+    return { ok: false, statusCode: 400, message: '缺少要选择的分组模板 ID' };
+  }
+
+  const applied = applyGroupTemplate(selectedTemplateId);
+  if (!applied.ok) {
+    return { ok: false, statusCode: 404, message: applied.message || '未找到分组模板' };
+  }
+
+  const xml = buildXml(applied.draft);
+  const workflow = createAgentWorkflow({
+    currentStep: 'select_group_template',
+    selectGroupTemplateStatus: 'completed'
+  });
+  const recommendations = session && Array.isArray(session.recommendations)
+    ? session.recommendations
+    : [applied.template];
+  const nextSession = upsertAgentSession(session ? session.id : sessionId, {
+    stage: AGENT_STAGE_TEMPLATE_SELECTION,
+    selectedTemplate: applied.template,
+    draft: applied.draft,
+    xml,
+    structureSummary: applied.summary,
+    workflow,
+    recommendations
+  });
+
+  return {
+    ok: true,
+    sessionId: nextSession.id,
+    stage: AGENT_STAGE_TEMPLATE_SELECTION,
+    reply: `已确认分组模板「${applied.template.displayName || applied.template.filename}」，并生成当前分组结构预览。`,
+    workflow,
+    ui: templateSelectionUi(recommendations, applied.template.id),
+    template: applied.template,
+    draft: applied.draft,
+    xml,
+    structureSummary: applied.summary,
+    session: publicAgentSession(nextSession)
+  };
+}
+
+function handleAgentEvent(input = {}) {
+  const type = String(input.type || '').trim();
+  const stage = String(input.stage || AGENT_STAGE_TEMPLATE_SELECTION).trim();
+  if (stage && stage !== AGENT_STAGE_TEMPLATE_SELECTION) {
+    return { ok: false, statusCode: 400, message: `暂不支持的智能体阶段：${stage}` };
+  }
+  if (type !== 'ui.option_selected' && type !== 'template.selected') {
+    return { ok: false, statusCode: 400, message: `暂不支持的智能体事件：${type || '(空)'}` };
+  }
+
+  const payload = input.payload && typeof input.payload === 'object' ? input.payload : {};
+  const templateId = payload.templateId || input.templateId || input.choiceId;
+  return applyTemplateSelectionEvent({
+    sessionId: String(input.sessionId || '').trim(),
+    templateId
+  });
+}
+
 function uid() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1270,6 +1506,121 @@ function defaultGroupFieldValue(field) {
   const meta = fieldMeta(field, 'group');
   if (meta.type === 'Multi') return defaultFromDefaultVal(meta.defaultval);
   return '';
+}
+
+function uniqueNonEmptyStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+}
+
+function validateTemplateFields(fields, { label, supportedFields = null } = {}) {
+  const errors = [];
+  const seen = new Set();
+  const list = Array.isArray(fields) ? fields : [];
+  list.forEach((field, index) => {
+    const name = String(field || '').trim();
+    if (!name) {
+      errors.push(`${label} 第 ${index + 1} 项为空`);
+      return;
+    }
+    if (seen.has(name)) errors.push(`${label} 字段重复：${name}`);
+    seen.add(name);
+    if (supportedFields && !supportedFields.includes(name)) {
+      errors.push(`${label} 包含不支持字段：${name}`);
+    }
+  });
+  return errors;
+}
+
+function validateMultiParamValue(errors, field, value, groupPath) {
+  const allowed = groupFieldAllowedValues(field);
+  if (!allowed.length) return;
+  const actual = String(value || '').trim();
+  if (!actual) return;
+  if (!allowed.includes(actual)) {
+    errors.push(`${groupPath} 参数「${field}」值无效：${actual}，可选值：${allowed.join('、')}`);
+  }
+}
+
+function validateFeatureSelectionValue(errors, value, featureSet, groupPath) {
+  const features = uniqueNonEmptyStrings(String(value || '').split(/[,，]/));
+  if (!features.length || !featureSet) return;
+  for (const feature of features) {
+    if (!featureSet.has(feature)) {
+      errors.push(`${groupPath} 特征选择包含未知特征：${feature}`);
+    }
+  }
+}
+
+function validateGroupNodes(nodes, groupTemplateFields, featureSet, parentPath = '根分组') {
+  const errors = [];
+  const siblingNames = new Set();
+  const list = Array.isArray(nodes) ? nodes : [];
+
+  list.forEach((node, index) => {
+    const rawName = node && typeof node === 'object' ? node.name : '';
+    const name = String(rawName || '').trim();
+    const pathLabel = name ? `${parentPath}/${name}` : `${parentPath}/第 ${index + 1} 个分组`;
+
+    if (!name) {
+      errors.push(`${pathLabel} 名称为空`);
+    } else if (siblingNames.has(name)) {
+      errors.push(`${parentPath} 下存在重复分组名：${name}`);
+    }
+    if (name) siblingNames.add(name);
+
+    const params = node && node.params && typeof node.params === 'object' ? node.params : {};
+    for (const field of groupTemplateFields) {
+      if (field === '名称') continue;
+      if (!(field in params)) {
+        errors.push(`${pathLabel} 缺少参数：${field}`);
+        continue;
+      }
+      validateMultiParamValue(errors, field, params[field], pathLabel);
+      if (field === '特征选择') {
+        validateFeatureSelectionValue(errors, params[field], featureSet, pathLabel);
+      }
+    }
+
+    const children = node && Array.isArray(node.children) ? node.children : [];
+    errors.push(...validateGroupNodes(children, groupTemplateFields, featureSet, pathLabel));
+  });
+
+  return errors;
+}
+
+function validateDraft(inputDraft, { features = null } = {}) {
+  const draft = normalizeDraft(inputDraft);
+  const errors = [];
+  const partFields = uniqueNonEmptyStrings(draft.partTemplateFields);
+  const groupFields = uniqueNonEmptyStrings(draft.groupTemplateFields);
+
+  errors.push(...validateTemplateFields(draft.partTemplateFields, {
+    label: 'Part_Template',
+    supportedFields: SUPPORTED_PART_FIELDS
+  }));
+  errors.push(...validateTemplateFields(draft.groupTemplateFields, {
+    label: 'Group_Template'
+  }));
+
+  if (!partFields.length) errors.push('Part_Template 至少需要包含 1 个字段');
+  if (!groupFields.length) errors.push('Group_Template 至少需要包含 1 个字段');
+  for (const required of DEFAULT_GROUP_TEMPLATE_FIELDS) {
+    if (!groupFields.includes(required)) errors.push(`Group_Template 缺少基础字段：${required}`);
+  }
+
+  if (partFields.includes(PART_FIELD_SPINDLE_AXIS) && !groupFields.includes(GROUP_FIELD_SPINDLE_FEATURE)) {
+    errors.push(`选择「${PART_FIELD_SPINDLE_AXIS}」时 Group_Template 必须包含「${GROUP_FIELD_SPINDLE_FEATURE}」`);
+  }
+  if (partFields.includes(PART_FIELD_AXIS) && !groupFields.includes(GROUP_FIELD_GENERAL_AXIS_FEATURE)) {
+    errors.push(`选择「${PART_FIELD_AXIS}」时 Group_Template 必须包含「${GROUP_FIELD_GENERAL_AXIS_FEATURE}」`);
+  }
+
+  const featureSet = Array.isArray(features) ? new Set(features) : null;
+  errors.push(...validateGroupNodes(draft.groups, groupFields, featureSet));
+
+  return errors;
 }
 
 function forEachGroup(groups, fn) {
@@ -2214,7 +2565,7 @@ function serveStatic(req, res, pathname) {
   res.end(data);
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host}`);
   const pathname = decodeURIComponent(urlObj.pathname);
 
@@ -2242,43 +2593,81 @@ const server = http.createServer((req, res) => {
     return sendJson(res, 200, { ok: true, templates });
   }
 
+  if (req.method === 'POST' && pathname === '/api/agent/message') {
+    try {
+      const parsed = await readJsonBody(req);
+      const result = createTemplateSelectionAgentResponse({
+        text: parsed.text || parsed.message || '',
+        sessionId: parsed.sessionId || '',
+        limit: Number(parsed.limit) || 3
+      });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/agent/event') {
+    try {
+      const parsed = await readJsonBody(req);
+      const result = handleAgentEvent(parsed);
+      return sendJson(res, result.ok ? 200 : (result.statusCode || 400), result);
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
+  }
+
+  if (req.method === 'GET' && pathname.startsWith('/api/agent/session/')) {
+    const sessionId = decodeURIComponent(pathname.slice('/api/agent/session/'.length));
+    const session = agentSessions.get(sessionId);
+    if (!session) return sendJson(res, 404, { ok: false, message: '未找到智能体会话' });
+    return sendJson(res, 200, {
+      ok: true,
+      sessionId: session.id,
+      stage: session.stage,
+      workflow: session.workflow,
+      session: publicAgentSession(session),
+      recommendations: session.recommendations || [],
+      template: session.selectedTemplate || null,
+      draft: session.draft || null,
+      xml: session.xml || '',
+      structureSummary: session.structureSummary || ''
+    });
+  }
+
   if (req.method === 'GET' && pathname === '/api/recognition-templates') {
     return sendJson(res, 200, { ok: true, templates: listRecognitionTemplates() });
   }
 
   if (req.method === 'POST' && pathname === '/api/group-templates/recommend') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const recommendations = recommendGroupTemplates({
         text: String(parsed.text || parsed.message || '').trim(),
         limit: Number(parsed.limit) || 5
       });
-      sendJson(res, 200, { ok: true, recommendations });
-    });
-    return;
+      return sendJson(res, 200, { ok: true, recommendations });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/templates/generate-fuzzy') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const result = generateFuzzyTemplate({
         text: String(parsed.text || parsed.message || '').trim(),
         limit: Number(parsed.limit) || 3
       });
-      sendJson(res, result.ok ? 200 : 400, result);
-    });
-    return;
+      return sendJson(res, result.ok ? 200 : 400, result);
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/group-templates/apply') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const result = applyGroupTemplate(String(parsed.templateId || '').trim());
       if (!result.ok) {
         return sendJson(res, 404, result);
@@ -2289,7 +2678,7 @@ const server = http.createServer((req, res) => {
         draft: result.draft,
         limit: 1
       })[0] || null;
-      sendJson(res, 200, {
+      return sendJson(res, 200, {
         ok: true,
         template: result.template,
         draft: result.draft,
@@ -2297,66 +2686,66 @@ const server = http.createServer((req, res) => {
         structureSummary: result.summary,
         recognitionRecommendation
       });
-    });
-    return;
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/recognition-templates/recommend') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const recommendations = recommendRecognitionTemplates({
         text: String(parsed.text || parsed.message || '').trim(),
         groupTemplate: parsed.groupTemplate || null,
         draft: parsed.draft || null,
         limit: Number(parsed.limit) || 3
       });
-      sendJson(res, 200, { ok: true, recommendations });
-    });
-    return;
+      return sendJson(res, 200, { ok: true, recommendations });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/settings') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const settings = writeSettings(parsed.settings || {});
-      sendJson(res, 200, { ok: true, settings });
-    });
-    return;
+      return sendJson(res, 200, { ok: true, settings });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/settings/test') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', async () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const settings = { ...readSettings(), ...(parsed.settings || {}) };
       const provider = settings.provider || 'gemini';
       const result = provider === 'openai_compatible'
         ? await testOpenAICompatible(settings)
         : await testGemini(settings);
-      sendJson(res, result.ok ? 200 : 400, result);
-    });
-    return;
+      return sendJson(res, result.ok ? 200 : 400, result);
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/chat') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', async () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const message = String(parsed.message || '').trim();
       const draft = normalizeDraft(parsed.draft);
 
       // Natural language export: allow users to export template directly via chat.
       if (/(导出模板|导出xml|导出\s*xml|保存模板|导出文件|导出)/i.test(message)) {
+        const draftErrs = validateDraft(draft, { features: readFeatures() });
+        if (draftErrs.length) {
+          return sendJson(res, 400, { ok: false, message: `导出失败：${draftErrs.join('；')}`, errors: draftErrs });
+        }
         const xml = buildXml(draft);
         const errs = validateBasicXml(xml);
         if (errs.length) {
-          return sendJson(res, 400, { ok: false, message: `导出失败：${errs.join('；')}` });
+          return sendJson(res, 400, { ok: false, message: `导出失败：${errs.join('；')}`, errors: errs });
         }
         const filename = `分组模板_${timestampName()}.xml`;
         const filePath = path.join(TEMPLATE_DIR, filename);
@@ -2412,7 +2801,7 @@ const server = http.createServer((req, res) => {
       }
 
       const xml = buildXml(result.draft);
-      sendJson(res, 200, {
+      return sendJson(res, 200, {
         ok: true,
         reply: result.reply,
         draft: result.draft,
@@ -2421,20 +2810,23 @@ const server = http.createServer((req, res) => {
         llmUnderstanding: result.llmUnderstanding || '',
         structureSummary: buildGroupStructureText(result.draft.groups || [])
       });
-    });
-    return;
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/save') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      const parsed = safeJsonParse(body) || {};
+    try {
+      const parsed = await readJsonBody(req);
       const draft = normalizeDraft(parsed.draft);
+      const draftErrs = validateDraft(draft, { features: readFeatures() });
+      if (draftErrs.length) {
+        return sendJson(res, 400, { ok: false, errors: draftErrs, message: `保存失败：${draftErrs.join('；')}` });
+      }
       const xml = buildXml(draft);
       const errs = validateBasicXml(xml);
       if (errs.length) {
-        return sendJson(res, 400, { ok: false, errors: errs });
+        return sendJson(res, 400, { ok: false, errors: errs, message: `保存失败：${errs.join('；')}` });
       }
       const filename = `分组模板_${timestampName()}.xml`;
       const filePath = path.join(TEMPLATE_DIR, filename);
@@ -2443,9 +2835,10 @@ const server = http.createServer((req, res) => {
       } catch (e) {
         return sendJson(res, 500, { ok: false, message: `导出失败：${e.message}` });
       }
-      sendJson(res, 200, { ok: true, filename, filePath, xml });
-    });
-    return;
+      return sendJson(res, 200, { ok: true, filename, filePath, xml });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { ok: false, message: e.message });
+    }
   }
 
   if (req.method === 'GET' && pathname === '/api/health') {
@@ -2475,12 +2868,17 @@ module.exports = {
   readTemplateCatalog,
   recommendGroupTemplates,
   generateFuzzyTemplate,
+  createTemplateSelectionAgentResponse,
+  applyTemplateSelectionEvent,
+  handleAgentEvent,
   listRecognitionTemplates,
   recommendRecognitionTemplates,
   applyGroupTemplate,
   applyMessage,
   buildXml,
   validateBasicXml,
+  validateDraft,
+  readJsonBody,
   readSettings,
   writeSettings,
   testGemini,

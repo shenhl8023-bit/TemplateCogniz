@@ -5,6 +5,13 @@
   "description": "AI对话生成分组模板 MVP",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "skill:features": "node skills/kmsoft-group-template/scripts/list_features.js",
+    "skill:select": "node skills/kmsoft-group-template/scripts/select_group_template.js",
+    "skill:parse": "node skills/kmsoft-group-template/scripts/parse_template.js",
+    "skill:recommend": "node skills/kmsoft-group-template/scripts/recommend_template.js",
+    "skill:validate": "node skills/kmsoft-group-template/scripts/validate_template.js",
+    "skill:apply": "node skills/kmsoft-group-template/scripts/apply_operations.js",
+    "skill:build": "node skills/kmsoft-group-template/scripts/build_template.js"
   }
 }

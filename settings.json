@@ -1,0 +1,9 @@
+{
+  "llmEnabled": false,
+  "provider": "openai_compatible",
+  "baseUrl": "https://integrate.api.nvidia.com/v1",
+  "apiKey": "",
+  "model": "meta/llama-3.1-8b-instruct",
+  "temperature": 0.2,
+  "llmTimeoutSec": 0
+}

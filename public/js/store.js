@@ -8,6 +8,8 @@ export const state = {
   supportedPartFields: [],
   groupTemplates: [],
   templateRecommendations: [],
+  agentSession: null,
+  agentWorkflow: null,
   selectedGroupTemplate: null,
   selectedRecognitionTemplate: null,
   xml: '',

@@ -46,6 +46,8 @@ export function createModeController({
     state.selectedNodeId = null;
     state.draggingNodeId = null;
     state.templateRecommendations = [];
+    state.agentSession = null;
+    state.agentWorkflow = null;
     state.selectedGroupTemplate = null;
     state.selectedRecognitionTemplate = null;
     state.draft.groups = [];

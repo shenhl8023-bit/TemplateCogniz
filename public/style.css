@@ -1296,6 +1296,101 @@ textarea,
   gap: 8px;
 }
 
+.agent-workflow-card {
+  border: 1px solid #c7d9ef;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: var(--shadow-1);
+}
+
+.agent-workflow-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #28425f;
+  margin-bottom: 8px;
+}
+
+.agent-workflow-list {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-workflow-step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  border: 1px solid #d8e5f3;
+  background: #fbfdff;
+}
+
+.agent-workflow-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #edf4fb;
+  border: 1px solid #cbdced;
+  color: #49627c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.agent-workflow-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #2e4967;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.agent-workflow-status {
+  min-width: 58px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-align: center;
+  background: #f0f5fb;
+  color: #60758c;
+  border: 1px solid #d5e1ee;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.agent-workflow-step.completed .agent-workflow-index,
+.agent-workflow-step.completed .agent-workflow-status {
+  background: #edf9f5;
+  border-color: #bfe3d5;
+  color: #267055;
+}
+
+.agent-workflow-step.waiting .agent-workflow-index,
+.agent-workflow-step.waiting .agent-workflow-status {
+  background: #fff7df;
+  border-color: #f0d99a;
+  color: #806322;
+}
+
+.agent-workflow-step.running .agent-workflow-index,
+.agent-workflow-step.running .agent-workflow-status {
+  background: #eef6ff;
+  border-color: #b8d6f5;
+  color: #265d94;
+}
+
+.agent-workflow-step.failed .agent-workflow-index,
+.agent-workflow-step.failed .agent-workflow-status {
+  background: #fff1f1;
+  border-color: #efc2c2;
+  color: #963232;
+}
+
 .template-recommend-item {
   border: 1px solid #c9dcf6;
   background: linear-gradient(180deg, #ffffff, #f7fbff);

@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "thresholds": {
+    "choiceConfidence": 0.35
+  },
+  "weights": {
+    "domainMatch": 0.38,
+    "featureMatch": 0.08,
+    "longTermMatch": 0.03,
+    "shortTermMatch": 0.015,
+    "groupCountDivisor": 500,
+    "groupCountCap": 30,
+    "featureCountDivisor": 600,
+    "featureCountCap": 20
+  },
+  "domains": [
+    {
+      "label": "衬套/套类/回转体",
+      "query": ["衬套", "轴套", "套类", "回转体", "轴类", "车削"],
+      "template": ["衬套", "轴套", "套类", "回转体", "轴类"]
+    },
+    {
+      "label": "壳体/箱体",
+      "query": ["壳体", "箱体", "盒体", "多面", "六面", "加工面"],
+      "template": ["壳体", "箱体", "盒体"]
+    },
+    {
+      "label": "小件/简单件",
+      "query": ["小件", "简单件", "简单零件", "通用件"],
+      "template": ["小件", "简单件", "简单零件", "通用件"]
+    },
+    {
+      "label": "活门/阀类",
+      "query": ["放油活门", "活门", "阀", "阀类"],
+      "template": ["放油活门", "活门", "阀", "阀类"]
+    }
+  ],
+  "features": [
+    {
+      "label": "A侧",
+      "terms": ["A侧", "A面", "A测", "a侧", "a面"]
+    },
+    {
+      "label": "B侧",
+      "terms": ["B侧", "B面", "B测", "b侧", "b面"]
+    },
+    {
+      "label": "端面",
+      "terms": ["端面", "轴端面"]
+    },
+    {
+      "label": "外圆",
+      "terms": ["外圆", "外圆柱面", "圆柱面"]
+    },
+    {
+      "label": "孔",
+      "terms": ["孔", "通孔", "盲孔", "直孔", "斜孔", "孔系", "内圆柱面"]
+    },
+    {
+      "label": "槽",
+      "terms": ["槽", "环槽", "外环槽", "内环槽", "凹槽", "通槽", "沟槽"]
+    },
+    {
+      "label": "倒角倒圆",
+      "terms": ["倒角", "倒圆", "倒圆倒角"]
+    }
+  ]
+}

@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kmsoft.local/schemas/select_group_template.confirm.response.schema.json",
+  "title": "SelectGroupTemplateConfirmResponse",
+  "oneOf": [
+    { "$ref": "#/$defs/completed" },
+    { "$ref": "#/$defs/validationFailed" },
+    { "$ref": "#/$defs/notFound" }
+  ],
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["ok", "action", "stage", "mode"],
+      "additionalProperties": true,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "action": { "const": "confirm" },
+        "stage": { "const": "select_group_template" },
+        "mode": {
+          "enum": ["completed", "validation_failed", "not_found"]
+        },
+        "reply": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "completed": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "action",
+            "stage",
+            "mode",
+            "workflow",
+            "selectedTemplate",
+            "structureSummary",
+            "handoff"
+          ],
+          "properties": {
+            "ok": { "const": true },
+            "mode": { "const": "completed" },
+            "workflow": { "$ref": "#/$defs/workflowCompleted" },
+            "ui": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/optionCards" }
+            },
+            "selectedTemplate": { "$ref": "#/$defs/template" },
+            "draft": { "type": "object" },
+            "xml": { "type": "string" },
+            "structureSummary": { "type": "string" },
+            "validation": {
+              "anyOf": [
+                { "type": "null" },
+                { "$ref": "#/$defs/validation" }
+              ]
+            },
+            "artifacts": { "type": "object" },
+            "handoff": { "$ref": "#/$defs/handoffCompleted" }
+          }
+        }
+      ]
+    },
+    "validationFailed": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "action",
+            "stage",
+            "mode",
+            "workflow",
+            "selectedTemplate",
+            "validation",
+            "handoff"
+          ],
+          "properties": {
+            "ok": { "const": false },
+            "mode": { "const": "validation_failed" },
+            "workflow": { "$ref": "#/$defs/workflowValidationFailed" },
+            "ui": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/optionCards" }
+            },
+            "selectedTemplate": { "$ref": "#/$defs/template" },
+            "validation": { "$ref": "#/$defs/validation" },
+            "artifacts": { "type": "object" },
+            "handoff": { "$ref": "#/$defs/handoffValidationFailed" }
+          }
+        }
+      ]
+    },
+    "notFound": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["ok", "action", "stage", "mode", "workflow", "message"],
+          "properties": {
+            "ok": { "const": false },
+            "mode": { "const": "not_found" },
+            "workflow": { "$ref": "#/$defs/workflowNotFound" },
+            "ui": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/optionCards" }
+            }
+          }
+        }
+      ]
+    },
+    "workflowCompleted": {
+      "allOf": [
+        { "$ref": "#/$defs/workflowBase" },
+        {
+          "properties": {
+            "steps": {
+              "items": {
+                "properties": {
+                  "status": { "const": "completed" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "workflowValidationFailed": {
+      "allOf": [
+        { "$ref": "#/$defs/workflowBase" },
+        {
+          "properties": {
+            "steps": {
+              "items": {
+                "properties": {
+                  "status": { "const": "validation_failed" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "workflowNotFound": {
+      "allOf": [
+        { "$ref": "#/$defs/workflowBase" },
+        {
+          "properties": {
+            "steps": {
+              "items": {
+                "properties": {
+                  "status": { "const": "not_found" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "workflowBase": {
+      "type": "object",
+      "required": ["currentStep", "steps"],
+      "properties": {
+        "currentStep": { "const": "select_group_template" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "status"],
+            "properties": {
+              "id": { "const": "select_group_template" },
+              "title": { "const": "选择分组模板" },
+              "status": {
+                "enum": ["completed", "validation_failed", "not_found"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "optionCards": {
+      "type": "object",
+      "required": ["type", "id", "stage", "title", "options"],
+      "properties": {
+        "type": { "const": "option_cards" },
+        "id": { "const": "group_template_candidates" },
+        "stage": { "const": "select_group_template" },
+        "title": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/templateOption" }
+        }
+      }
+    },
+    "templateOption": {
+      "type": "object",
+      "required": ["id", "choiceId", "templateId", "title", "confidence", "selected"],
+      "properties": {
+        "id": { "type": "string" },
+        "choiceId": { "type": "string" },
+        "templateId": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "confidence": { "type": "number" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "selected": { "type": "boolean" }
+      }
+    },
+    "template": {
+      "type": "object",
+      "required": ["id", "templateId", "filename", "displayName", "groupCount", "depth"],
+      "properties": {
+        "id": { "type": "string" },
+        "templateId": { "type": "string" },
+        "filename": { "type": "string" },
+        "displayName": { "type": "string" },
+        "relativePath": { "type": "string" },
+        "groupCount": { "type": "integer" },
+        "depth": { "type": "integer" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["ok", "errors", "warnings"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/validationIssue" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/validationIssue" }
+        }
+      }
+    },
+    "validationIssue": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "path": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "handoffCompleted": {
+      "type": "object",
+      "required": ["step", "completed", "selectedGroupTemplate", "structureSummary"],
+      "properties": {
+        "step": { "const": "select_group_template" },
+        "completed": { "const": true },
+        "selectedGroupTemplate": { "$ref": "#/$defs/template" },
+        "draft": { "type": "object" },
+        "xml": { "type": "string" },
+        "structureSummary": { "type": "string" }
+      }
+    },
+    "handoffValidationFailed": {
+      "type": "object",
+      "required": ["step", "completed", "selectedGroupTemplate", "validation"],
+      "properties": {
+        "step": { "const": "select_group_template" },
+        "completed": { "const": false },
+        "selectedGroupTemplate": { "$ref": "#/$defs/template" },
+        "validation": { "$ref": "#/$defs/validation" }
+      }
+    }
+  }
+}

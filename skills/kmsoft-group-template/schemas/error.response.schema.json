@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kmsoft.local/schemas/select_group_template.error.response.schema.json",
+  "title": "SelectGroupTemplateErrorResponse",
+  "type": "object",
+  "required": ["ok", "stage", "mode", "message"],
+  "additionalProperties": true,
+  "properties": {
+    "ok": {
+      "const": false
+    },
+    "action": {
+      "type": "string"
+    },
+    "stage": {
+      "const": "select_group_template"
+    },
+    "mode": {
+      "const": "error"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
