@@ -12,6 +12,8 @@ const TEMPLATE_DIR = path.join(ROOT, '分组模板');
 const FEATURE_FILE = path.join(ROOT, '特征选择列表', 'FeatureTemplate.xml');
 const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 const PROMPT_FILE = path.join(ROOT, 'prompts', 'intent_prompt.md');
+const SKILL_DIR = path.join(ROOT, 'skills', 'kmsoft-group-template');
+const SKILL_FILE = path.join(SKILL_DIR, 'SKILL.md');
 const TEMP_EXPORT_DIR = path.join(ROOT, '.codex-runtime');
 const DEFAULT_JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const CONFIGURED_JSON_BODY_LIMIT_BYTES = Number(process.env.JSON_BODY_LIMIT_BYTES);
@@ -153,6 +155,12 @@ function writeSettings(input) {
   return merged;
 }
 
+function numberSetting(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function testGemini(settings) {
   const apiKey = (settings.apiKey || '').trim();
   const model = (settings.model || '').trim() || 'gemini-1.5-flash';
@@ -163,7 +171,7 @@ async function testGemini(settings) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text: 'ping' }] }],
-    generationConfig: { temperature: Number(settings.temperature || 0.2) }
+    generationConfig: { temperature: numberSetting(settings.temperature, 0.2) }
   };
 
   try {
@@ -193,7 +201,7 @@ async function testOpenAICompatible(settings) {
   const body = {
     model,
     messages: [{ role: 'user', content: 'ping' }],
-    temperature: Number(settings.temperature || 0.2),
+    temperature: numberSetting(settings.temperature, 0.2),
     max_tokens: 32
   };
   try {
@@ -219,19 +227,45 @@ function extractJsonObject(text) {
   if (!text || typeof text !== 'string') return null;
   const trimmed = text.trim();
   const direct = safeJsonParse(trimmed);
-  if (direct && typeof direct === 'object') return direct;
-  const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (codeBlock) {
-    const parsed = safeJsonParse(codeBlock[1].trim());
-    if (parsed && typeof parsed === 'object') return parsed;
-  }
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    const parsed = safeJsonParse(trimmed.slice(start, end + 1));
-    if (parsed && typeof parsed === 'object') return parsed;
-  }
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct;
   return null;
+}
+
+function readTextIfExists(file) {
+  try {
+    if (!fs.existsSync(file)) return '';
+    return fs.readFileSync(file, 'utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
+function stripYamlFrontmatter(markdown) {
+  return String(markdown || '').replace(/^---[\s\S]*?---\s*/, '').trim();
+}
+
+function loadSkillContext(mode) {
+  const skillBody = stripYamlFrontmatter(readTextIfExists(SKILL_FILE));
+  if (!skillBody) return '';
+
+  const referenceNames = mode === 'intent'
+    ? ['intent-operations.md']
+    : [];
+  const references = referenceNames
+    .map((name) => readTextIfExists(path.join(SKILL_DIR, 'references', name)).trim())
+    .filter(Boolean);
+
+  return [
+    '# Project Skill: kmsoft-group-template',
+    skillBody,
+    references.length ? '# Loaded Skill References' : '',
+    references.join('\n\n')
+  ].filter(Boolean).join('\n\n');
+}
+
+function withSkillContext(prompt, mode) {
+  const skillContext = loadSkillContext(mode);
+  return [skillContext, prompt].filter((part) => String(part || '').trim()).join('\n\n');
 }
 
 function llmIntentPrompt(message, draft, featureDict) {
@@ -318,10 +352,10 @@ async function parseByGemini(settings, message, draft, featureDict) {
   const body = {
     contents: [{
       role: 'user',
-      parts: [{ text: llmIntentPrompt(message, draft, featureDict) }]
+      parts: [{ text: withSkillContext(llmIntentPrompt(message, draft, featureDict), 'intent') }]
     }],
     generationConfig: {
-      temperature: Number(settings.temperature || 0.2)
+      temperature: numberSetting(settings.temperature, 0.2)
     }
   };
 
@@ -372,10 +406,11 @@ async function parseByOpenAICompatible(settings, message, draft, featureDict) {
     model,
     messages: [
       { role: 'system', content: '你是分组模板指令解析器。只返回JSON对象。' },
-      { role: 'user', content: llmIntentPrompt(message, draft, featureDict) }
+      { role: 'user', content: withSkillContext(llmIntentPrompt(message, draft, featureDict), 'intent') }
     ],
-    temperature: Number(settings.temperature || 0.2),
-    max_tokens: 900
+    temperature: numberSetting(settings.temperature, 0.2),
+    max_tokens: 900,
+    response_format: { type: 'json_object' }
   };
 
   const timeoutMs = Math.max(0, Number(settings.llmTimeoutSec || 0)) * 1000;

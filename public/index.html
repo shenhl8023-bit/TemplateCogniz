@@ -4,20 +4,46 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI对话生成分组模板</title>
-  <link rel="stylesheet" href="/style.css?v=20260608_1" />
+  <link rel="stylesheet" href="/style.css?v=20260715_usability1" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-icon">🔧</span>
+      <span class="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7.5h16" />
+          <path d="M4 12h10" />
+          <path d="M4 16.5h7" />
+          <path d="M16 11.5l3 3-3 3" />
+        </svg>
+      </span>
       <div>
         <div class="brand-title">分组模板生成助手</div>
         <div class="brand-sub">通过对话创建零件分组模板 · 导出 XML</div>
       </div>
     </div>
     <div class="top-actions">
-      <button id="settingsBtn" type="button">⚙ 设置</button>
-      <button id="resetBtn" type="button">↻ 重置</button>
+      <button id="undoBtn" type="button" disabled title="撤销上一步 (Ctrl+Z)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 14L4 9l5-5" />
+          <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+        </svg>
+        <span class="btn-label">撤销</span>
+      </button>
+      <button id="settingsBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+        设置
+      </button>
+      <button id="resetBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 3-6.7" />
+          <path d="M3 4v5h5" />
+        </svg>
+        重置
+      </button>
     </div>
   </header>
 
@@ -26,13 +52,22 @@
       <div class="chat-main-scroll">
         <div class="floating-content">
           <div class="assistant-row" id="entryCard">
-            <div class="assistant-avatar">🤖</div>
+            <div class="assistant-avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="7" width="14" height="11" rx="3" />
+                <path d="M9 11h.01M15 11h.01" />
+                <path d="M9.5 14.5c.8.8 1.7 1.2 2.5 1.2s1.7-.4 2.5-1.2" />
+                <path d="M12 7V4" />
+                <circle cx="12" cy="3.5" r="0.8" fill="currentColor" stroke="none" />
+              </svg>
+            </div>
             <div class="entry-card">
               <h2>你好！我是零件分组模板生成助手</h2>
-              <p>我会通过对话引导你创建分组模板。请选择操作方式：</p>
+              <p>点一张场景卡立刻出草稿，或直接在下方描述零件。也可进入手动模式逐项勾选参数。</p>
+              <div class="scene-card-grid" id="sceneCardList" aria-label="常用零件场景"></div>
               <div class="entry-actions">
-                <button id="modeDescribeBtn">描述零件类型（智能推荐参数）</button>
-                <button id="modeManualBtn">手动选择参数</button>
+                <button id="modeDescribeBtn" type="button">自由描述零件</button>
+                <button id="modeManualBtn" type="button" class="entry-secondary">手动选择参数</button>
               </div>
             </div>
           </div>
@@ -69,8 +104,16 @@
       </div>
 
       <div class="input-dock">
-        <textarea id="chatInput" placeholder="描述分组结构，如“在A侧添加外圆和端面，B侧也一样”"></textarea>
-        <button id="sendBtn" class="send-btn">➤</button>
+        <div class="phrase-chips" id="phraseChips" aria-label="常用短语"></div>
+        <div class="input-row">
+          <textarea id="chatInput" placeholder="描述分组结构，如“在A侧添加外圆和端面，B侧也一样”"></textarea>
+          <button id="sendBtn" class="send-btn" aria-label="发送">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h12" />
+              <path d="M13 6l6 6-6 6" />
+            </svg>
+          </button>
+        </div>
       </div>
     </section>
 
@@ -78,16 +121,51 @@
 
     <aside class="preview-panel">
       <div class="preview-header">
-        <h1>🌳 分组树预览</h1>
+        <h1>
+          <span class="header-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 4h5v7H6z" />
+              <path d="M13 4h5v4h-5z" />
+              <path d="M13 11h5v9h-5z" />
+              <path d="M6 14h5v6H6z" />
+            </svg>
+          </span>
+          分组树预览
+        </h1>
         <div class="preview-actions">
-          <button id="exportTemplateBtn">⬇ 导出模板</button>
-          <button id="previewTemplateBtn">📄 预览模板</button>
+          <button id="exportTemplateBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 4v10" />
+              <path d="M8 10l4 4 4-4" />
+              <path d="M5 19h14" />
+            </svg>
+            <span class="btn-label">导出模板</span>
+          </button>
+          <button id="previewTemplateBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 4h7l4 4v12H7z" />
+              <path d="M14 4v4h4" />
+              <path d="M10 12h5M10 15h5M10 18h3" />
+            </svg>
+            <span class="btn-label">预览模板</span>
+          </button>
         </div>
       </div>
 
       <div id="emptyPreview" class="empty-preview">
-        <div class="empty-icon">📋</div>
-        <p>开始对话后，<br />分组结构会显示在这里</p>
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 4h6l4 4v12H8z" />
+            <path d="M14 4v4h4" />
+            <path d="M11 12h5" />
+            <path d="M11 15h5" />
+            <path d="M11 18h3" />
+          </svg>
+        </div>
+        <p id="emptyPreviewText">点左侧场景卡，或描述零件类型，分组树会出现在这里</p>
+        <div class="empty-actions" id="emptyPreviewActions">
+          <button type="button" id="emptySceneHintBtn" class="empty-action-btn">用轴类样例试试</button>
+        </div>
       </div>
 
       <div id="previewContent" class="right-scroll hidden">
@@ -162,6 +240,6 @@
     </div>
   </div>
 
-  <script type="module" src="/js/main.js?v=20260304_25"></script>
+  <script type="module" src="/js/main.js?v=20260715_comfort1"></script>
 </body>
 </html>

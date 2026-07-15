@@ -24,7 +24,7 @@ test('left workspace content has its own scroll area', () => {
   assert.match(html, /<div class="chat-main-scroll">/);
   assert.match(mainContentRule, /overflow-y:\s*auto/);
   assert.match(mainContentRule, /min-height:\s*0/);
-  assert.match(layoutRule, /height:\s*calc\(100vh - 64px\)/);
+  assert.match(layoutRule, /height:\s*calc\(100vh - (?:64px|var\(--topbar-h\))\)/);
 });
 
 test('right preview sections have clear visual boundaries', () => {
@@ -32,13 +32,13 @@ test('right preview sections have clear visual boundaries', () => {
   const css = readPublicFile('style.css');
   const rightSectionRule = extractRule(css, '.right-section-card');
   const rightSectionBeforeRule = extractRule(css, '.right-section-card::before');
-  const rightSectionDividerRule = extractRule(css, '.right-section-card + .right-section-card');
 
   assert.match(html, /id="partCardsSection" class="stack-card right-section-card hidden"/);
   assert.match(html, /<div class="stack-card right-section-card">\s*<h2>[^<]+<\/h2>\s*<div id="tree"><\/div>/);
   assert.match(html, /id="groupCardsSection" class="stack-card right-section-card hidden"/);
   assert.match(rightSectionRule, /position:\s*relative/);
-  assert.match(rightSectionRule, /border:\s*1px solid #bfd4f1/);
-  assert.match(rightSectionBeforeRule, /height:\s*3px/);
-  assert.match(rightSectionDividerRule, /border-top:\s*1px solid #c7d9f1/);
+  assert.match(rightSectionRule, /border:\s*1px solid/);
+  assert.match(rightSectionRule, /border-radius:/);
+  assert.match(rightSectionBeforeRule, /height:\s*\d+px/);
+  assert.match(rightSectionBeforeRule, /background:/);
 });

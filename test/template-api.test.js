@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
 const test = require('node:test');
 
 process.env.NO_LISTEN = '1';
@@ -8,9 +10,11 @@ const { Readable } = require('node:stream');
 
 const { server, readJsonBody, readSettings, validateDraft, writeSettings } = require('../server');
 
-function listen() {
+const ROOT = path.resolve(__dirname, '..');
+
+function listen(app = server) {
   return new Promise((resolve) => {
-    const instance = server.listen(0, '127.0.0.1', () => {
+    const instance = app.listen(0, '127.0.0.1', () => {
       const { port } = instance.address();
       resolve({ instance, baseUrl: `http://127.0.0.1:${port}` });
     });
@@ -31,6 +35,33 @@ async function requestJson(baseUrl, pathname, options = {}) {
 
 function streamFromChunks(chunks) {
   return Readable.from(chunks.map((chunk) => Buffer.from(chunk)));
+}
+
+function createFakeOpenAIServer(content) {
+  const requests = [];
+  const fakeServer = http.createServer((req, res) => {
+    assert.equal(req.method, 'POST');
+    assert.equal(req.url, '/chat/completions');
+
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      requests.push({
+        headers: req.headers,
+        body: JSON.parse(body)
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        choices: [{
+          message: { content }
+        }]
+      }));
+    });
+  });
+  fakeServer.requests = requests;
+  return fakeServer;
 }
 
 test('POST APIs return JSON errors for invalid JSON bodies', async () => {
@@ -445,5 +476,135 @@ test('chat API falls back to rule parser when LLM is disabled', async () => {
   } finally {
     writeSettings(previousSettings);
     await new Promise((resolve) => instance.close(resolve));
+  }
+});
+
+test('chat API sends loaded intent prompt and skill context to OpenAI-compatible chat completions', async () => {
+  const fakeServer = createFakeOpenAIServer(JSON.stringify({
+    operations: [
+      { type: 'add_top_groups', groups: ['A侧'] }
+    ],
+    canonical_text: '创建A侧分组',
+    assistant_reply: '已创建A侧'
+  }));
+  let fake = null;
+  let app = null;
+  const previousSettings = readSettings();
+
+  try {
+    fake = await listen(fakeServer);
+    app = await listen(server);
+    writeSettings({
+      ...previousSettings,
+      llmEnabled: true,
+      provider: 'openai_compatible',
+      baseUrl: fake.baseUrl,
+      apiKey: 'test-key',
+      model: 'test-model',
+      temperature: 0
+    });
+
+    const draft = {
+      partTemplateFields: ['原点'],
+      groupTemplateFields: ['依赖方向', '依赖方式', '特征选择'],
+      partParams: { 原点: '' },
+      groups: [
+        {
+          id: 'existing-group',
+          name: '已有组',
+          params: { 名称: '已有组', 依赖方向: '任意方向', 依赖方式: '无', 特征选择: '' },
+          children: []
+        }
+      ]
+    };
+
+    const { resp, data } = await requestJson(app.baseUrl, '/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        draft,
+        message: '创建A侧分组'
+      })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.llmUsed, true);
+    assert.equal(data.reply, '已创建A侧');
+    assert.ok(data.draft.groups.some((group) => group.name === 'A侧'));
+
+    assert.equal(fakeServer.requests.length, 1);
+    const request = fakeServer.requests[0];
+    assert.equal(request.headers.authorization, 'Bearer test-key');
+    assert.equal(request.body.model, 'test-model');
+    assert.equal(request.body.temperature, 0);
+    assert.deepEqual(request.body.response_format, { type: 'json_object' });
+    assert.equal(request.body.messages.length, 2);
+    assert.deepEqual(request.body.messages.map((message) => message.role), ['system', 'user']);
+    assert.match(request.body.messages[0].content, /只返回JSON对象/);
+
+    const userPrompt = request.body.messages[1].content;
+    const promptFile = fs.readFileSync(path.join(ROOT, 'prompts', 'intent_prompt.md'), 'utf8');
+    assert.ok(userPrompt.includes(promptFile.split('{{PARENT_GROUPS}}')[0].trim()));
+    assert.ok(userPrompt.includes('# Project Skill: kmsoft-group-template'));
+    assert.ok(userPrompt.includes('# Kmsoft Group Template Selection'));
+    assert.ok(userPrompt.includes('# Natural-Language Intent Operations'));
+    assert.ok(userPrompt.includes('当前已有分组名: ["已有组"]'));
+    assert.ok(userPrompt.includes('当前零件参数字段: ["原点"]'));
+    assert.ok(userPrompt.includes('用户输入: 创建A侧分组'));
+    assert.doesNotMatch(userPrompt, /\{\{(?:PARENT_GROUPS|GROUP_TREE|PART_FIELDS|GROUP_FIELDS|FEATURE_DICT|USER_INPUT)\}\}/);
+  } finally {
+    writeSettings(previousSettings);
+    if (app) await new Promise((resolve) => app.instance.close(resolve));
+    if (fake) await new Promise((resolve) => fake.instance.close(resolve));
+  }
+});
+
+test('chat API rejects Markdown-wrapped LLM JSON and falls back to rule parsing', async () => {
+  const fakeServer = createFakeOpenAIServer([
+    '```json',
+    JSON.stringify({
+      operations: [
+        { type: 'add_top_groups', groups: ['B侧'] }
+      ],
+      assistant_reply: 'this should not be accepted'
+    }),
+    '```'
+  ].join('\n'));
+  let fake = null;
+  let app = null;
+  const previousSettings = readSettings();
+
+  try {
+    fake = await listen(fakeServer);
+    app = await listen(server);
+    writeSettings({
+      ...previousSettings,
+      llmEnabled: true,
+      provider: 'openai_compatible',
+      baseUrl: fake.baseUrl,
+      apiKey: 'test-key',
+      model: 'test-model',
+      temperature: 0
+    });
+
+    const init = await requestJson(app.baseUrl, '/api/init');
+    const { resp, data } = await requestJson(app.baseUrl, '/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        draft: init.data.draft,
+        message: '创建A侧分组'
+      })
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(fakeServer.requests.length, 1);
+    assert.equal(data.llmUsed, false);
+    assert.ok(data.draft.groups.some((group) => group.name === 'A侧'));
+    assert.equal(data.draft.groups.some((group) => group.name === 'B侧'), false);
+  } finally {
+    writeSettings(previousSettings);
+    if (app) await new Promise((resolve) => app.instance.close(resolve));
+    if (fake) await new Promise((resolve) => fake.instance.close(resolve));
   }
 });

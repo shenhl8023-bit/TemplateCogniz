@@ -17,7 +17,11 @@ export function createModeController({
     if (els.previewContent) els.previewContent.classList.remove('hidden');
     setInputEnabled(true, '描述分组结构，如“在A侧添加外圆和端面，B侧也一样”');
     if (els.xmlCard) els.xmlCard.classList.add('hidden');
-    if (els.previewTemplateBtn) els.previewTemplateBtn.textContent = '📄 预览模板';
+    if (els.previewTemplateBtn) {
+      const label = els.previewTemplateBtn.querySelector('.btn-label');
+      if (label) label.textContent = '预览模板';
+      else els.previewTemplateBtn.textContent = '预览模板';
+    }
   }
 
   function showDescribeSamplePanel() {
@@ -51,6 +55,8 @@ export function createModeController({
     state.selectedGroupTemplate = null;
     state.selectedRecognitionTemplate = null;
     state.draft.groups = [];
+    state.draft.partTemplateFields = [];
+    state.draft.partParams = {};
     if (els.manualPanel) els.manualPanel.classList.add('hidden');
     if (els.entryCard) els.entryCard.classList.remove('hidden');
     if (els.emptyPreview) els.emptyPreview.classList.remove('hidden');
@@ -58,6 +64,7 @@ export function createModeController({
     if (els.chatInput) els.chatInput.value = '';
     if (els.describeSamplePanel) els.describeSamplePanel.classList.add('hidden');
     if (els.manualSelectPanel) els.manualSelectPanel.classList.add('hidden');
+    if (els.xmlCard) els.xmlCard.classList.add('hidden');
     setInputEnabled(true, '可直接输入分组描述，如“创建A侧和B侧分组”');
     clearMessages();
     renderAll();

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kmsoft 分组模板可视化测试台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Kmsoft Group Template</p>
+          <h1>分组模板可视化测试台</h1>
+        </div>
+        <div class="status-strip" aria-live="polite">
+          <span id="serverStatus" class="status-pill status-muted">连接中</span>
+          <span id="templateCount" class="status-pill">模板 0</span>
+          <span id="featureCount" class="status-pill">特征 0</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel control-panel" aria-labelledby="requestTitle">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h2 id="requestTitle">测试输入</h2>
+            </div>
+            <button id="smokeBtn" class="secondary-btn" type="button">冒烟测试</button>
+          </div>
+
+          <label class="field-label" for="descriptionInput">零件描述</label>
+          <textarea id="descriptionInput" spellcheck="false">衬套 A侧 B侧 端面 外圆 孔</textarea>
+
+          <div class="preset-grid" aria-label="快速示例">
+            <button class="preset-btn" type="button" data-text="衬套 A侧 B侧 端面 外圆 孔 外环槽">衬套</button>
+            <button class="preset-btn" type="button" data-text="壳体 孔系 平面 通槽 六面 加工面分离">壳体</button>
+            <button class="preset-btn" type="button" data-text="带车削特征的小件 外圆 端面 孔 平面">小件</button>
+            <button class="preset-btn" type="button" data-text="放油活门 A侧 B侧 中间孔 端面">活门</button>
+          </div>
+
+          <div class="inline-form">
+            <label>
+              <span>候选数</span>
+              <input id="limitInput" type="number" min="1" max="10" value="3" />
+            </label>
+            <label class="checkbox-label">
+              <input id="writeFileToggle" type="checkbox" />
+              <span>确认时写入 demo/output</span>
+            </label>
+          </div>
+
+          <button id="proposeBtn" class="primary-btn" type="button">推荐模板</button>
+
+          <div class="template-browser">
+            <div class="browser-head">
+              <h3>样例模板</h3>
+              <input id="templateSearch" type="search" placeholder="搜索模板或特征" />
+            </div>
+            <div id="templateList" class="template-list" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="panel result-panel" aria-labelledby="candidateTitle">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Step 2</p>
+              <h2 id="candidateTitle">候选结果</h2>
+            </div>
+            <span id="modeBadge" class="mode-badge">待推荐</span>
+          </div>
+          <div id="candidateList" class="candidate-list empty-state">
+            <p>输入描述后点击“推荐模板”。</p>
+          </div>
+        </section>
+
+        <section class="panel detail-panel" aria-labelledby="detailTitle">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h2 id="detailTitle">模板结构与输出</h2>
+            </div>
+            <button id="buildDraftBtn" class="secondary-btn" type="button">构建 Draft</button>
+          </div>
+
+          <div id="summaryStats" class="summary-stats">
+            <div>
+              <strong>0</strong>
+              <span>分组</span>
+            </div>
+            <div>
+              <strong>0</strong>
+              <span>层级</span>
+            </div>
+            <div>
+              <strong>0</strong>
+              <span>特征</span>
+            </div>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="详情视图">
+            <button class="tab active" type="button" data-tab="tree">结构树</button>
+            <button class="tab" type="button" data-tab="draft">Draft</button>
+            <button class="tab" type="button" data-tab="xml">XML</button>
+            <button class="tab" type="button" data-tab="json">JSON</button>
+            <button class="tab" type="button" data-tab="log">日志</button>
+          </div>
+
+          <div class="tab-panels">
+            <div id="treePanel" class="tab-panel active">
+              <div id="fieldPills" class="pill-cloud"></div>
+              <div id="structureTree" class="tree-view empty-state">
+                <p>选择或确认模板后显示结构。</p>
+              </div>
+            </div>
+            <div id="draftPanel" class="tab-panel">
+              <textarea id="draftEditor" class="code-editor" spellcheck="false"></textarea>
+            </div>
+            <div id="xmlPanel" class="tab-panel">
+              <pre id="xmlOutput" class="code-block"></pre>
+            </div>
+            <div id="jsonPanel" class="tab-panel">
+              <pre id="jsonOutput" class="code-block"></pre>
+            </div>
+            <div id="logPanel" class="tab-panel">
+              <pre id="logOutput" class="code-block"></pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

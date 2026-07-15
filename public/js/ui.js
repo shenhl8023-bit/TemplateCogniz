@@ -1,4 +1,4 @@
-import { state, findNodeById } from './store.js';
+import { state, findNodeById, createNode } from './store.js';
 import { apiAgentEvent, apiAgentMessage, apiApplyGroupTemplate, apiGenerateFuzzyTemplate, apiInit, apiRecommendGroupTemplates, apiSave } from './services.js';
 import { AIService } from './ai-service.js';
 import { ChatEngine } from './chat-engine.js';
@@ -21,6 +21,8 @@ import {
   syncGroupTemplateByPartSelection
 } from './commands.js';
 import { fieldDesc } from './param-meta.js';
+import { createToastApi } from './toast.js';
+import { createHistory, validateDraftForExport } from './history.js';
 
 const els = {
   describeSamplePanel: document.getElementById('describeSamplePanel'),
@@ -34,6 +36,7 @@ const els = {
   modeManualBtn: document.getElementById('modeManualBtn'),
   settingsBtn: document.getElementById('settingsBtn'),
   resetBtn: document.getElementById('resetBtn'),
+  undoBtn: document.getElementById('undoBtn'),
   settingsModal: document.getElementById('settingsModal'),
   llmEnabledInput: document.getElementById('llmEnabledInput'),
   providerInput: document.getElementById('providerInput'),
@@ -51,11 +54,15 @@ const els = {
   splitter: document.getElementById('splitter'),
   xmlCard: document.getElementById('xmlCard'),
   emptyPreview: document.getElementById('emptyPreview'),
+  emptyPreviewText: document.getElementById('emptyPreviewText'),
+  emptySceneHintBtn: document.getElementById('emptySceneHintBtn'),
   previewContent: document.getElementById('previewContent'),
   partFieldList: document.getElementById('partFieldList'),
   chatLog: document.getElementById('chatLog'),
   chatInput: document.getElementById('chatInput'),
   sendBtn: document.getElementById('sendBtn'),
+  phraseChips: document.getElementById('phraseChips'),
+  sceneCardList: document.getElementById('sceneCardList'),
   tree: document.getElementById('tree'),
   groupCardsSection: document.getElementById('groupCardsSection'),
   groupCardsBody: document.getElementById('groupCardsBody'),
@@ -78,6 +85,8 @@ const els = {
 
 const aiService = new AIService();
 const chatEngine = new ChatEngine();
+const toast = createToastApi();
+const draftHistory = createHistory({ limit: 20 });
 let settingsController = null;
 let modeController = null;
 let chatView = null;
@@ -92,19 +101,124 @@ const DESCRIBE_EXAMPLES = [
   {
     name: '轴类样例',
     text: '轴类零件，分A侧和B侧，按端面和外圆分组',
-    partFields: ['原点', '主方向1', '有主轴线']
+    partFields: ['原点', '主方向1', '有主轴线'],
+    groups: [
+      { name: 'A侧', children: [{ name: '端面' }, { name: '外圆' }] },
+      { name: 'B侧', children: [{ name: '端面' }, { name: '外圆' }] }
+    ]
   },
   {
     name: '壳体样例',
     text: '壳体件，按多方向面分组，区分孔和通槽',
-    partFields: ['主方向1', '主方向2', '主方向3', '主方向4', '主方向5', '主方向6', '是否需要加工面分离']
+    partFields: ['主方向1', '主方向2', '主方向3', '主方向4', '主方向5', '主方向6', '是否需要加工面分离'],
+    groups: [
+      { name: '周边分组', children: [{ name: '平面' }, { name: '通槽' }] },
+      { name: '孔系分组', children: [{ name: '孔' }] }
+    ]
+  },
+  {
+    name: '衬套样例',
+    text: '衬套类回转体，分A侧和B侧，含外圆、端面、孔和槽',
+    partFields: ['原点', '主方向1', '有主轴线'],
+    groups: [
+      { name: 'A侧', children: [{ name: '外圆' }, { name: '端面' }, { name: '孔' }] },
+      { name: 'B侧', children: [{ name: '外圆' }, { name: '端面' }, { name: '槽' }] }
+    ]
   },
   {
     name: '简件样例',
     text: '简单小件，方向要求低，按特征直接打包',
-    partFields: ['原点', '主方向']
+    partFields: ['原点', '主方向'],
+    groups: [
+      { name: '主分组', children: [{ name: '平面' }, { name: '孔' }] }
+    ]
   }
 ];
+const PHRASE_CHIPS = [
+  { label: '创建A侧和B侧', text: '创建A侧和B侧两个顶层分组' },
+  { label: '加外圆和端面', text: '在当前选中分组下添加外圆和端面' },
+  { label: 'B侧也一样', text: 'B侧也一样' },
+  { label: '添加孔', text: '添加孔子分组' }
+];
+
+function captureHistorySnapshot() {
+  return {
+    draft: state.draft,
+    selectedNodeId: state.selectedNodeId,
+    selectedGroupTemplate: state.selectedGroupTemplate,
+    selectedRecognitionTemplate: state.selectedRecognitionTemplate,
+    templateRecommendations: state.templateRecommendations,
+    partFieldsConfirmed: state.partFieldsConfirmed,
+    modeActive: state.modeActive,
+    modeType: state.modeType,
+    xml: state.xml
+  };
+}
+
+function pushHistory() {
+  if (!state.draft) return;
+  draftHistory.push(captureHistorySnapshot());
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  if (!els.undoBtn) return;
+  const can = draftHistory.canUndo();
+  els.undoBtn.disabled = !can;
+  els.undoBtn.title = can ? '撤销上一步 (Ctrl+Z)' : '暂无可撤销操作';
+}
+
+function restoreHistorySnapshot(snap) {
+  if (!snap || !snap.draft) return false;
+  state.draft = snap.draft;
+  state.selectedNodeId = snap.selectedNodeId || null;
+  state.selectedGroupTemplate = snap.selectedGroupTemplate || null;
+  state.selectedRecognitionTemplate = snap.selectedRecognitionTemplate || null;
+  state.templateRecommendations = Array.isArray(snap.templateRecommendations)
+    ? snap.templateRecommendations
+    : [];
+  state.partFieldsConfirmed = !!snap.partFieldsConfirmed;
+  state.modeActive = !!snap.modeActive;
+  state.modeType = snap.modeType || null;
+  state.draggingNodeId = null;
+  expandedNodeIds.clear();
+  setXml(snap.xml || '');
+  if (state.modeActive) {
+    if (els.entryCard) els.entryCard.classList.add('hidden');
+    if (els.manualPanel) els.manualPanel.classList.remove('hidden');
+    if (els.emptyPreview) els.emptyPreview.classList.add('hidden');
+    if (els.previewContent) els.previewContent.classList.remove('hidden');
+  }
+  return true;
+}
+
+function undoLastChange() {
+  const snap = draftHistory.pop();
+  updateUndoButton();
+  if (!snap) {
+    toast.info('没有可撤销的操作');
+    return;
+  }
+  restoreHistorySnapshot(snap);
+  renderPartFieldList(state.supportedPartFields || []);
+  renderAll();
+  refreshXmlOnly();
+  toast.ok('已撤销上一步');
+}
+
+function buildGroupsFromSpec(specs, groupTemplateFields) {
+  const walk = (items) => {
+    const out = [];
+    for (const item of items || []) {
+      if (!item || !item.name) continue;
+      const node = createNode(item.name, groupTemplateFields);
+      node.children = walk(item.children || []);
+      out.push(node);
+    }
+    return out;
+  };
+  return walk(specs);
+}
 
 function persistDraftCache() {
   // disabled: avoid bringing stale groups/checked fields back on next open
@@ -217,10 +331,12 @@ function renderPartFieldList(allFields) {
   for (const field of sorted) {
     const checked = state.draft.partTemplateFields.includes(field);
     listGrid.appendChild(fieldPill(field, checked, (on) => {
+      pushHistory();
       togglePartField(state.draft, field, on);
       state.partFieldsConfirmed = state.draft.partTemplateFields.length > 0;
       refreshXmlOnly();
       renderAll();
+      toast.ok(on ? `已添加参数「${field}」` : `已移除参数「${field}」`);
     }));
   }
   listCard.appendChild(listGrid);
@@ -228,8 +344,9 @@ function renderPartFieldList(allFields) {
 }
 
 
-function applyDescribeExample(example) {
+function applyDescribeExample(example, { withGroups = false } = {}) {
   if (!example || !state.draft) return;
+  pushHistory();
   state.selectedNodeId = null;
   state.draggingNodeId = null;
   state.draft.groups = [];
@@ -241,11 +358,88 @@ function applyDescribeExample(example) {
   for (const f of fields) addPartTemplateField(state.draft, f);
   syncGroupTemplateByPartSelection(state.draft);
 
+  if (withGroups && Array.isArray(example.groups) && example.groups.length) {
+    state.draft.groups = buildGroupsFromSpec(example.groups, state.draft.groupTemplateFields);
+  }
+
   state.partFieldsConfirmed = state.draft.partTemplateFields.length > 0;
   renderPartFieldList(state.supportedPartFields || []);
   renderAll();
   refreshXmlOnly();
-  chatView.addMessage('bot', `已应用「${example.name}」推荐参数：${fields.join('、')}`);
+
+  const groupHint = withGroups && state.draft.groups.length
+    ? `，并生成 ${state.draft.groups.length} 个顶层分组`
+    : '';
+  const msg = `已应用「${example.name}」推荐参数：${fields.join('、')}${groupHint}`;
+  if (chatView) chatView.addMessage('bot', msg);
+  toast.ok(`已套用${example.name}`);
+}
+
+function applySceneCard(example) {
+  if (!example || !state.draft) return;
+  if (modeController && typeof modeController.enterWorkMode === 'function') {
+    modeController.enterWorkMode();
+  }
+  state.modeType = 'describe';
+  if (els.describeSamplePanel) els.describeSamplePanel.classList.remove('hidden');
+  if (els.manualSelectPanel) els.manualSelectPanel.classList.add('hidden');
+  applyDescribeExample(example, { withGroups: true });
+  if (chatView) {
+    chatView.setInputEnabled(true, '描述分组结构，如“在A侧添加外圆和端面，B侧也一样”');
+    chatView.addMessage('bot', `已从场景「${example.name}」生成草稿。可继续用对话微调，或直接在右侧编辑分组树。`);
+    chatView.focusInput();
+  }
+}
+
+function renderSceneCards() {
+  if (!els.sceneCardList) return;
+  els.sceneCardList.innerHTML = '';
+  for (const ex of DESCRIBE_EXAMPLES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'scene-card';
+    btn.setAttribute('aria-label', `套用${ex.name}`);
+
+    const title = document.createElement('span');
+    title.className = 'scene-card-title';
+    title.textContent = ex.name;
+    btn.appendChild(title);
+
+    const desc = document.createElement('span');
+    desc.className = 'scene-card-desc';
+    desc.textContent = ex.text;
+    btn.appendChild(desc);
+
+    const meta = document.createElement('span');
+    meta.className = 'scene-card-meta';
+    meta.textContent = '一点即用';
+    btn.appendChild(meta);
+
+    btn.addEventListener('click', () => applySceneCard(ex));
+    els.sceneCardList.appendChild(btn);
+  }
+}
+
+function renderPhraseChips() {
+  if (!els.phraseChips) return;
+  els.phraseChips.innerHTML = '';
+  for (const chip of PHRASE_CHIPS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'phrase-chip';
+    btn.textContent = chip.label;
+    btn.title = chip.text;
+    btn.addEventListener('click', () => {
+      if (!els.chatInput || els.chatInput.disabled) return;
+      const current = els.chatInput.value.trim();
+      els.chatInput.value = current ? `${current} ${chip.text}` : chip.text;
+      els.chatInput.focus();
+      // Move caret to end
+      const len = els.chatInput.value.length;
+      els.chatInput.setSelectionRange(len, len);
+    });
+    els.phraseChips.appendChild(btn);
+  }
 }
 
 function renderDescribeExampleList() {
@@ -268,8 +462,8 @@ function renderDescribeExampleList() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'describe-example-inline-btn';
-    btn.textContent = `套用${ex.name}参数`;
-    btn.addEventListener('click', () => applyDescribeExample(ex));
+    btn.textContent = `套用${ex.name}`;
+    btn.addEventListener('click', () => applyDescribeExample(ex, { withGroups: true }));
     row.appendChild(btn);
     els.describeExampleList.appendChild(row);
   }
@@ -464,6 +658,7 @@ async function requestAgentTemplateSelection(text) {
 async function applyRecommendedTemplate(templateId) {
   if (!templateId) return;
   try {
+    pushHistory();
     const useAgentEvent = !!(state.agentSession && state.agentSession.id);
     const data = useAgentEvent
       ? await apiAgentEvent({
@@ -484,13 +679,16 @@ async function applyRecommendedTemplate(templateId) {
     expandedNodeIds.clear();
     setXml(data.xml);
     renderAll();
-    chatView.addMessage('bot', data.reply || `已应用分组模板「${data.template.displayName || data.template.filename}」。`);
+    const appliedName = (data.template && (data.template.displayName || data.template.filename)) || '模板';
+    chatView.addMessage('bot', data.reply || `已应用分组模板「${appliedName}」。`);
     if (!useAgentEvent && state.selectedRecognitionTemplate) {
       chatView.addMessage('bot', `已选择自动识别模板「${state.selectedRecognitionTemplate.name}」。`);
     }
     chatView.addMessage('system', `当前分组结构：\n${data.structureSummary || '(暂无分组)'}`);
+    toast.ok(`已应用「${appliedName}」`);
   } catch (e) {
     chatView.addMessage('bot', `应用模板失败：${e.message}`);
+    toast.error(`应用模板失败：${e.message}`);
   }
 }
 
@@ -500,6 +698,7 @@ async function handleFuzzyTemplateGeneration(text) {
     const data = await apiGenerateFuzzyTemplate(text.trim(), 3);
 
     if (data.mode === 'auto_applied') {
+      pushHistory();
       state.draft = adoptServerDraft(data.draft);
       state.selectedGroupTemplate = data.template || null;
       state.selectedRecognitionTemplate = data.recognitionRecommendation || null;
@@ -513,6 +712,7 @@ async function handleFuzzyTemplateGeneration(text) {
         chatView.addMessage('bot', `已选择自动识别模板「${state.selectedRecognitionTemplate.name}」。`);
       }
       chatView.addMessage('system', `当前分组结构：\n${data.structureSummary || '(暂无分组)'}`);
+      toast.ok('已自动生成模板草稿');
       persistDraftCache();
       return true;
     }
@@ -567,20 +767,29 @@ function renderAll() {
           return out;
         };
         const ids = collectIds(node, []);
+        pushHistory();
         deleteGroup(state.draft.groups, id);
         for (const x of ids) expandedNodeIds.delete(x);
         if (ids.includes(state.selectedNodeId)) state.selectedNodeId = null;
         renderAll();
         refreshXmlOnly();
+        toast.ok(`已删除分组「${node.name}」`);
       },
       onDragStart: (id) => {
         state.draggingNodeId = id;
       },
       onDrop: (targetId) => {
+        pushHistory();
         const ok = moveNodeAsChild(state.draft.groups, state.draggingNodeId, targetId);
-        if (!ok) return;
+        if (!ok) {
+          draftHistory.pop();
+          updateUndoButton();
+          toast.warn('无法移动到该位置');
+          return;
+        }
         renderAll();
         refreshXmlOnly();
+        toast.ok('已调整分组层级');
       }
     });
   };
@@ -637,28 +846,34 @@ function renderAll() {
       },
       onSave: () => {
         if (!selectedNode) return;
+        pushHistory();
         for (const [field, value] of Object.entries(groupEditState.values || {})) {
           setGroupParam(selectedNode, field, value);
         }
         renderTreeOnly();
         refreshXmlOnly();
+        toast.ok('已保存分组参数');
       }
     }
   );
 
   if (els.partTplFields) {
     renderTemplateEditor(els.partTplFields, state.draft.partTemplateFields, (field) => {
+      pushHistory();
       removePartTemplateField(state.draft, field);
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已移除零件参数「${field}」`);
     });
   }
 
   if (els.groupTplFields) {
     renderTemplateEditor(els.groupTplFields, state.draft.groupTemplateFields, (field) => {
+      pushHistory();
       removeGroupTemplateField(state.draft, field);
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已移除分组参数「${field}」`);
     });
   }
   persistDraftCache();
@@ -684,6 +899,7 @@ async function sendChat() {
   }
   chatView.clearInput();
   chatView.addMessage('user', text);
+  pushHistory();
   if (state.modeType === 'describe') {
     const agentHandled = await requestAgentTemplateSelection(text);
     if (agentHandled) {
@@ -709,7 +925,11 @@ async function sendChat() {
   try {
     const result = await chatEngine.processUserInput(state.draft, text);
     if (!result.ok) {
+      // Roll back history snapshot since nothing changed
+      draftHistory.pop();
+      updateUndoButton();
       chatView.addMessage('bot', result.message || '请求失败');
+      toast.error(result.message || '请求失败');
       if (warnedSlow) {
         chatView.addMessage('system', '提示：本次等待较久，你可在“设置”中配置超时秒数（0=不限时）。');
       }
@@ -727,6 +947,7 @@ async function sendChat() {
     const structureText = (result.structureSummary || '').trim();
     chatView.addMessage('system', `当前分组结构：\n${structureText || '(暂无分组)'}`);
     renderAll();
+    toast.ok('已更新分组结构');
     chatView.setInputEnabled(true, '描述分组结构，如“在A侧添加外圆和端面，B侧也一样”');
     chatView.focusInput();
     persistDraftCache();
@@ -738,6 +959,15 @@ async function sendChat() {
 
 async function saveDraft() {
   if (exportInProgress) return;
+
+  const localErrors = validateDraftForExport(state.draft);
+  if (localErrors.length) {
+    const detail = localErrors.join('；');
+    chatView.addMessage('bot', `导出前检查未通过：${detail}`);
+    toast.warn(localErrors[0]);
+    return;
+  }
+
   exportInProgress = true;
   if (els.exportTemplateBtn) els.exportTemplateBtn.disabled = true;
   if (els.saveBtn) els.saveBtn.disabled = true;
@@ -747,12 +977,16 @@ async function saveDraft() {
     if (!data.ok) {
       const detail = data.message || (Array.isArray(data.errors) && data.errors.join('；')) || '未知错误';
       chatView.addMessage('bot', `保存失败：${detail}`);
+      toast.error(Array.isArray(data.errors) && data.errors[0] ? data.errors[0] : detail);
       return;
     }
     setXml(data.xml || '');
     chatView.addMessage('bot', `已导出模板：${data.filename}\n导出路径：${data.filePath}`);
+    toast.ok(`已导出：${data.filename}`);
   } catch (err) {
-    chatView.addMessage('bot', `保存失败：${err.message || '网络请求失败'}`);
+    const msg = err.message || '网络请求失败';
+    chatView.addMessage('bot', `保存失败：${msg}`);
+    toast.error(msg);
   } finally {
     exportInProgress = false;
     if (els.exportTemplateBtn) els.exportTemplateBtn.disabled = false;
@@ -764,19 +998,45 @@ function bindEvents() {
   settingsController.bindEvents();
   modeController.bindEvents();
 
+  if (els.undoBtn) {
+    els.undoBtn.addEventListener('click', () => undoLastChange());
+  }
+
+  window.addEventListener('keydown', (event) => {
+    const key = (event.key || '').toLowerCase();
+    const isUndo = (event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey;
+    if (!isUndo) return;
+    const tag = (event.target && event.target.tagName) || '';
+    // Allow native undo inside text fields
+    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+    event.preventDefault();
+    undoLastChange();
+  });
+
+  if (els.emptySceneHintBtn) {
+    els.emptySceneHintBtn.addEventListener('click', () => {
+      const axis = DESCRIBE_EXAMPLES.find((x) => x.name === '轴类样例') || DESCRIBE_EXAMPLES[0];
+      applySceneCard(axis);
+    });
+  }
+
   els.previewTemplateBtn.addEventListener('click', () => {
     if (!state.modeActive) {
-      window.alert('请先选择上方操作方式并开始对话。');
+      toast.warn('请先点场景卡或开始对话');
       return;
     }
     const isHidden = els.xmlCard.classList.contains('hidden');
     if (isHidden) {
       els.xmlCard.classList.remove('hidden');
-      els.previewTemplateBtn.textContent = '📄 隐藏模板';
+      const hideLabel = els.previewTemplateBtn.querySelector('.btn-label');
+      if (hideLabel) hideLabel.textContent = '隐藏模板';
+      else els.previewTemplateBtn.textContent = '隐藏模板';
       els.xmlCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } else {
       els.xmlCard.classList.add('hidden');
-      els.previewTemplateBtn.textContent = '📄 预览模板';
+      const showLabel = els.previewTemplateBtn.querySelector('.btn-label');
+      if (showLabel) showLabel.textContent = '预览模板';
+      else els.previewTemplateBtn.textContent = '预览模板';
     }
   });
 
@@ -801,33 +1061,39 @@ function bindEvents() {
     els.addTopBtn.addEventListener('click', () => {
       const name = window.prompt('请输入顶层分组名称');
       if (!name) return;
+      pushHistory();
       addTopGroup(state.draft.groups, name, state.draft.groupTemplateFields);
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已添加顶层分组「${name}」`);
     });
   }
 
   if (els.addChildBtn) {
     els.addChildBtn.addEventListener('click', () => {
       if (!state.selectedNodeId) {
-        window.alert('请先选择一个分组节点');
+        toast.warn('请先选择一个分组节点');
         return;
       }
       const name = window.prompt('请输入子分组名称');
       if (!name) return;
+      pushHistory();
       addChildGroup(state.draft.groups, state.selectedNodeId, name, state.draft.groupTemplateFields);
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已添加子分组「${name}」`);
     });
   }
 
   if (els.deleteNodeBtn) {
     els.deleteNodeBtn.addEventListener('click', () => {
       if (!state.selectedNodeId) return;
+      pushHistory();
       deleteGroup(state.draft.groups, state.selectedNodeId);
       state.selectedNodeId = null;
       renderAll();
       refreshXmlOnly();
+      toast.ok('已删除分组');
     });
   }
 
@@ -839,10 +1105,12 @@ function bindEvents() {
     els.addPartTplFieldBtn.addEventListener('click', () => {
       const name = els.newPartTplField.value.trim();
       if (!name) return;
+      pushHistory();
       addPartTemplateField(state.draft, name);
       els.newPartTplField.value = '';
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已添加零件参数「${name}」`);
     });
   }
 
@@ -850,10 +1118,12 @@ function bindEvents() {
     els.addGroupTplFieldBtn.addEventListener('click', () => {
       const name = els.newGroupTplField.value.trim();
       if (!name) return;
+      pushHistory();
       addGroupTemplateField(state.draft, name);
       els.newGroupTplField.value = '';
       renderAll();
       refreshXmlOnly();
+      toast.ok(`已添加分组参数「${name}」`);
     });
   }
 }
@@ -914,8 +1184,12 @@ export async function initApp() {
   state.selectedGroupTemplate = null;
   state.selectedRecognitionTemplate = null;
   state.supportedPartFields = data.supportedPartFields || [];
+  draftHistory.clear();
+  updateUndoButton();
   renderPartFieldList(state.supportedPartFields);
   renderDescribeExampleList();
+  renderSceneCards();
+  renderPhraseChips();
   chatView = createChatView({
     chatLogEl: els.chatLog,
     chatInputEl: els.chatInput,
@@ -929,7 +1203,11 @@ export async function initApp() {
     renderAll,
     refreshXmlOnly,
     addMsg: (role, text) => chatView.addMessage(role, text),
-    clearMessages: () => chatView.clearMessages(),
+    clearMessages: () => {
+      chatView.clearMessages();
+      draftHistory.clear();
+      updateUndoButton();
+    },
     setInputEnabled: (enabled, placeholder) => chatView.setInputEnabled(enabled, placeholder)
   });
   bindEvents();
